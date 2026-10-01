@@ -11,6 +11,8 @@ readonly ACTIVE_LOG_DIR="${LOG_DIR}/active"
 readonly ARCHIVE_LOG_DIR="${LOG_DIR}/archive"
 readonly SAMPLE_DIR="${APP_ROOT}/malware_samples"
 readonly SWAPFILE="/swapfile"
+SSH_LOGIN_USER=""
+SSH_LOGIN_PASSWORD=""
 
 log() { printf '[guardian-install] %s\n' "$*"; }
 warn() { printf '[guardian-install][WARN] %s\n' "$*" >&2; }
@@ -32,7 +34,7 @@ readonly PACKAGES=(
   build-essential pigz htop iotop git curl wget jq zram-tools watchdog irqbalance
   swapspace network-manager avahi-daemon avahi-utils iproute2 iptables wireless-tools
   iw libpcap-dev tcpdump tshark fail2ban libpam-google-authenticator docker.io
-  docker-compose-plugin python3-pip python3-venv python3-full
+  docker-compose-plugin python3-pip python3-venv python3-full openssh-server
 )
 
 ensure_line() {
@@ -81,6 +83,33 @@ install_application() {
   "${APP_ROOT}/venv/bin/pip" install --upgrade pip
   "${APP_ROOT}/venv/bin/pip" install scapy rich psutil
   chown -R root:root "${APP_ROOT}/venv" "${APP_ROOT}/core"
+}
+
+configure_ssh() {
+  log "SSH erişimi yapılandırılıyor..."
+  local login_user="${SUDO_USER:-}"
+  if [[ -z "${login_user}" || "${login_user}" == "root" ]]; then
+    login_user="$(logname 2>/dev/null || true)"
+  fi
+  [[ -n "${login_user}" && "${login_user}" != "root" ]] ||
+    die "SSH parolası için root olmayan kurulum kullanıcısı belirlenemedi."
+  id -u "${login_user}" >/dev/null 2>&1 ||
+    die "Kurulum kullanıcısı bulunamadı: ${login_user}"
+
+  SSH_LOGIN_USER="${login_user}"
+  SSH_LOGIN_PASSWORD="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
+  [[ "${#SSH_LOGIN_PASSWORD}" -eq 48 ]] || die "Rastgele SSH parolası üretilemedi."
+  printf '%s:%s\n' "${SSH_LOGIN_USER}" "${SSH_LOGIN_PASSWORD}" | chpasswd
+
+  install -d -m 0755 /etc/ssh/sshd_config.d
+  cat > /etc/ssh/sshd_config.d/99-guardian-access.conf <<'EOF'
+PasswordAuthentication yes
+KbdInteractiveAuthentication yes
+UsePAM yes
+EOF
+  /usr/sbin/sshd -t
+  systemctl enable --now ssh
+  systemctl restart ssh
 }
 
 configure_memory() {
@@ -278,9 +307,14 @@ main() {
   configure_kernel_and_watchdog
   configure_network_and_services
   configure_archiving
+  configure_ssh
   log "Guardian servisi etkinleştiriliyor..."
   systemctl start guardian-core.service
   log "Kurulum tamamlandı. Durum: systemctl --no-pager status guardian-core.service"
+  printf '\nSSH giriş bilgileri (bu parola tekrar gösterilmeyecektir):\n'
+  printf '  Kullanıcı: %s\n' "${SSH_LOGIN_USER}"
+  printf '  Parola:    %s\n' "${SSH_LOGIN_PASSWORD}"
+  printf '  Bağlantı:  ssh %s@<RASPBERRY_PI_IP>\n\n' "${SSH_LOGIN_USER}"
 }
 
 main "$@"

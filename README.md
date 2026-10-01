@@ -16,6 +16,7 @@ Raspberry Pi 5 üzerinde çalışan, Dionaea honeypot ve Scapy tabanlı ağ göz
 - SYN flood/sysctl korumaları
 - RFC1918 egress engeli ve izole malware örnek dizini
 - fail2ban ve Google Authenticator için SSH MFA hazırlığı
+- OpenSSH kurulumu ve mevcut kurulum kullanıcısı için ilk rastgele parola
 
 > İlk sürüm yalnızca Raspberry Pi'nin gördüğü trafiği izler. Ağdaki tüm cihazları görmek için Pi'nin gateway/bridge veya mirror port konumunda olması gerekir.
 
@@ -46,7 +47,8 @@ Kurulum scripti:
 7. Docker Compose ile Dionaea'yı başlatır; 4. CPU ve 1 GB RAM limiti uygular.
 8. NetworkManager dispatcher, guardian servisi ve log arşiv timer'ını etkinleştirir.
 9. fail2ban ve SSH MFA hazırlığını kurar.
-10. Servislerin durumunu ve temel health check sonuçlarını gösterir.
+10. OpenSSH yoksa kurar, kurulumu çalıştıran kullanıcıya rastgele başlangıç parolası atar ve bilgileri kurulum sonunda gösterir.
+11. Servislerin durumunu ve temel health check sonuçlarını gösterir.
 
 Kurulum sırasında egress karantinası, Avahi kamuflajı ve birincil arayüz seçimi istenir. Egress ve Avahi varsayılan olarak kapalıdır. RFC1918 yönlerine giden Docker trafiği her durumda engellenir.
 
@@ -56,6 +58,18 @@ Kurulum sırasında egress karantinası, Avahi kamuflajı ve birincil arayüz se
 systemctl status guardian-core.service
 systemctl status guardian-log-archive.timer
 docker compose -f /opt/guardian/docker/docker-compose.yml ps
+```
+
+Kurulum tamamlandığında SSH kullanıcı adı ve rastgele parola yalnızca terminalde bir kez gösterilir:
+
+```bash
+ssh <kullanıcı>@<RASPBERRY_PI_IP>
+```
+
+İlk başarılı girişten sonra parolayı değiştirin:
+
+```bash
+passwd
 ```
 
 Canlı dashboard:
@@ -74,6 +88,7 @@ Olay logları `/opt/guardian/logs/active/events.jsonl` altında tutulur.
 - Honeypot yönetimi için Docker socket konteynere bağlanmaz.
 - Malware örnekleri `/opt/guardian/malware_samples` altında `0700` izinlerle tutulur.
 - Google Authenticator PAM satırı `nullok` ile hazırlanır; MFA otomatik zorlanmaz. Kullanıcı için `google-authenticator` çalıştırıp mevcut SSH oturumu doğrulandıktan sonra `AuthenticationMethods publickey,keyboard-interactive:pam` satırını etkinleştirin.
+- SSH parola erişimi kurulum tamamlanana kadar etkinleştirilir; ekranda gösterilen ilk parolayı ilk girişten sonra değiştirin. Parola log dosyalarına yazılmaz.
 - `config/guardian.conf` içindeki `EGRESS_QUARANTINE` ve `AVAHI_ENABLED` ayarlarını bilinçli değiştirin.
 
 Egress kuralları Docker'ın `DOCKER-USER` zincirinde uygulanır. Mevcut host firewall kuralları silinmez. İkincil arayüz bağlandığında, `PRIMARY_INTERFACE` seçilmişse o arayüzdeki default route kaldırılır; bu nedenle kurulum sırasında yönetim bağlantısının birincil arayüzünü doğru seçin.
