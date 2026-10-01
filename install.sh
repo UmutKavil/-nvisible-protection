@@ -11,8 +11,8 @@ readonly ACTIVE_LOG_DIR="${LOG_DIR}/active"
 readonly ARCHIVE_LOG_DIR="${LOG_DIR}/archive"
 readonly SAMPLE_DIR="${APP_ROOT}/malware_samples"
 readonly SWAPFILE="/swapfile"
+readonly ORIGINAL_HOSTNAME="$(hostname)"
 SSH_LOGIN_USER=""
-SSH_LOGIN_PASSWORD=""
 
 log() { printf '[guardian-install] %s\n' "$*"; }
 warn() { printf '[guardian-install][WARN] %s\n' "$*" >&2; }
@@ -24,17 +24,16 @@ trap 'die "Kurulum ${BASH_SOURCE[0]}:${LINENO} satırında başarısız oldu."' 
 [[ -r /etc/os-release ]] || die "/etc/os-release bulunamadı."
 # shellcheck disable=SC1091
 source /etc/os-release
-[[ "${ID:-}" == "ubuntu" && "${VERSION_ID:-}" == "24.04" ]] ||
-  die "Ubuntu Server 24.04 gereklidir: ${PRETTY_NAME:-bilinmiyor}"
+[[ "${ID:-}" == "ubuntu" ]] || die "Ubuntu Server gereklidir: ${PRETTY_NAME:-bilinmiyor}"
 
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 
 readonly PACKAGES=(
   build-essential pigz htop iotop git curl wget jq zram-tools watchdog irqbalance
-  swapspace network-manager avahi-daemon avahi-utils iproute2 iptables wireless-tools
+  swapspace network-manager avahi-daemon avahi-utils iproute2 iptables
   iw libpcap-dev tcpdump tshark fail2ban libpam-google-authenticator docker.io
-  docker-compose-plugin python3-pip python3-venv python3-full openssh-server
+  docker-compose python3-pip python3-venv python3-full openssh-server
 )
 
 ensure_line() {
@@ -46,7 +45,7 @@ install_packages() {
   log "Paket listesi güncelleniyor..."
   apt-get update
   echo "wireshark-common wireshark-common/install-setuid boolean true" | debconf-set-selections
-  log "Ubuntu 24.04 paketleri kuruluyor..."
+  log "Paketler kuruluyor..."
   apt-get install -y "${PACKAGES[@]}"
   apt-get purge -y earlyoom 2>/dev/null || true
   systemctl disable --now earlyoom.service 2>/dev/null || true
@@ -97,10 +96,6 @@ configure_ssh() {
     die "Kurulum kullanıcısı bulunamadı: ${login_user}"
 
   SSH_LOGIN_USER="${login_user}"
-  SSH_LOGIN_PASSWORD="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
-  [[ "${#SSH_LOGIN_PASSWORD}" -eq 48 ]] || die "Rastgele SSH parolası üretilemedi."
-  printf '%s:%s\n' "${SSH_LOGIN_USER}" "${SSH_LOGIN_PASSWORD}" | chpasswd
-
   install -d -m 0755 /etc/ssh/sshd_config.d
   cat > /etc/ssh/sshd_config.d/99-guardian-access.conf <<'EOF'
 PasswordAuthentication yes
@@ -308,12 +303,13 @@ main() {
   configure_network_and_services
   configure_archiving
   configure_ssh
+  [[ "$(hostname)" == "${ORIGINAL_HOSTNAME}" ]] ||
+    die "Kurulum sırasında cihaz hostname'i değişti; mevcut isim korunamadı."
   log "Guardian servisi etkinleştiriliyor..."
   systemctl start guardian-core.service
   log "Kurulum tamamlandı. Durum: systemctl --no-pager status guardian-core.service"
-  printf '\nSSH giriş bilgileri (bu parola tekrar gösterilmeyecektir):\n'
+  printf '\nSSH mevcut kullanıcı ile etkinleştirildi:\n'
   printf '  Kullanıcı: %s\n' "${SSH_LOGIN_USER}"
-  printf '  Parola:    %s\n' "${SSH_LOGIN_PASSWORD}"
   printf '  Bağlantı:  ssh %s@<RASPBERRY_PI_IP>\n\n' "${SSH_LOGIN_USER}"
 }
 
