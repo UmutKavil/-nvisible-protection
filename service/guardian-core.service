@@ -1,0 +1,21 @@
+[Unit]
+Description=Invisible Protection network guardian
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/guardian/core
+ExecStart=/opt/guardian/venv/bin/python3 /opt/guardian/core/sniffer.py --config /opt/guardian/config/guardian.conf
+CPUAffinity=1 2
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/guardian/logs/active
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

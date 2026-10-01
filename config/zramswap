@@ -1,0 +1,4 @@
+ALGO=zstd
+PERCENT=50
+PRIORITY=100
+# setup-memory.sh applies a fixed 4 GiB disk size and a 50% physical-RAM mem_limit.

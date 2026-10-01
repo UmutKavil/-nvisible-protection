@@ -1,0 +1,22 @@
+services:
+  dionaea:
+    image: dinotools/dionaea:latest
+    container_name: invisible-dionaea
+    restart: unless-stopped
+    cpuset: "3"
+    mem_limit: 1g
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "21:21"
+      - "22:22"
+      - "23:23"
+      - "80:80"
+      - "445:445"
+      - "3306:3306"
+    volumes:
+      - /opt/guardian/malware_samples:/opt/dionaea/var/dionaea/binaries:rw
+      - /opt/guardian/logs/active/dionaea:/var/lib/dionaea:rw

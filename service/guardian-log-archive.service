@@ -1,0 +1,6 @@
+[Unit]
+Description=Archive Invisible Protection logs
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/archive_daily_logs.sh

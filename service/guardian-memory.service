@@ -1,0 +1,12 @@
+[Unit]
+Description=Invisible Protection memory shield
+After=local-fs.target
+Before=guardian-core.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/setup-memory.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
