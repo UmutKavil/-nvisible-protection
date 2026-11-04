@@ -1,0 +1,6 @@
+[Unit]
+Description=Archive old Guardian SQLite events and vacuum
+
+[Service]
+Type=oneshot
+ExecStart=/opt/guardian/venv/bin/python3 /usr/local/lib/guardian/sqlite-maintenance.py

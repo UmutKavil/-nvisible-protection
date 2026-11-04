@@ -1,0 +1,6 @@
+[Unit]
+Description=Guardian CPU temperature sample
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/guardian-temperature-monitor.sh

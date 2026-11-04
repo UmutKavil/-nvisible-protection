@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import logging
+import os
+import socket
+import threading
 import time
 from collections import defaultdict, deque
 from typing import Any
@@ -13,6 +17,34 @@ from logger import JsonEventLogger
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 LOGGER = logging.getLogger("guardian")
+
+
+def notify_systemd(state: str) -> None:
+    notify_socket = os.environ.get("NOTIFY_SOCKET")
+    if not notify_socket:
+        return
+    address = notify_socket
+    if notify_socket.startswith("@"):
+        address = "\0" + notify_socket[1:]
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as client:
+            client.connect(address)
+            client.sendall(state.encode())
+    except OSError:
+        LOGGER.debug("systemd watchdog bildirimi gönderilemedi", exc_info=True)
+
+
+def maintenance_loop(event_logger: JsonEventLogger) -> None:
+    # Watchdog sık beslenir; ağır nesne sayımı yalnızca beş dakikada bir loglanır.
+    last_report = 0.0
+    while True:
+        gc.collect()
+        now = time.monotonic()
+        if now - last_report >= 300:
+            event_logger.event("runtime_maintenance", gc_objects=len(gc.get_objects()))
+            last_report = now
+        notify_systemd("WATCHDOG=1")
+        time.sleep(30)
 
 
 class AnomalyDetector:
@@ -66,13 +98,16 @@ def main() -> None:
     parser.add_argument("--config", default="/etc/invisible-protection/guardian.conf")
     args = parser.parse_args()
     config = load_config(args.config)
+    event_logger = JsonEventLogger(config["EVENT_LOG"], config.get("EVENT_DB"))
+    threading.Thread(target=maintenance_loop, args=(event_logger,), daemon=True).start()
     detector = AnomalyDetector(
-        JsonEventLogger(config["EVENT_LOG"]),
+        event_logger,
         int(config.get("PORT_SCAN_THRESHOLD", "20")),
         int(config.get("CONNECTION_RATE_THRESHOLD", "60")),
         int(config.get("WINDOW_SECONDS", "60")),
     )
     interface = config.get("INTERFACE", "auto")
+    notify_systemd("READY=1")
     sniff(iface=None if interface == "auto" else interface, prn=detector.observe, store=False)
 
 

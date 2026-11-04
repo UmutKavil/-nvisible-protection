@@ -1,0 +1,6 @@
+[Unit]
+Description=Persist Guardian RAM logs
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/guardian-log2ram-sync.sh

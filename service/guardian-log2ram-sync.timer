@@ -1,0 +1,10 @@
+[Unit]
+Description=Persist Guardian RAM logs hourly
+
+[Timer]
+OnBootSec=1h
+OnUnitActiveSec=1h
+Unit=guardian-log2ram-sync.service
+
+[Install]
+WantedBy=timers.target

@@ -11,5 +11,6 @@ case "${2:-}" in
     if [[ "${EGRESS_QUARANTINE:-0}" == "1" ]]; then
       /opt/guardian/network/iptables_rules.sh apply
     fi
+    systemctl try-restart guardian-core.service 2>/dev/null || true
     ;;
 esac

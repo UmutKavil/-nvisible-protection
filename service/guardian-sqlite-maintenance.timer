@@ -1,0 +1,10 @@
+[Unit]
+Description=Monthly Guardian SQLite maintenance
+
+[Timer]
+OnCalendar=monthly
+Persistent=true
+Unit=guardian-sqlite-maintenance.service
+
+[Install]
+WantedBy=timers.target

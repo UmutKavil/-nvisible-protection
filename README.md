@@ -61,7 +61,7 @@ Kurulum scripti:
 4. `/etc/sysctl.d/99-guardian.conf` ile çekirdek ağ ve bellek korumalarını uygular.
 5. Sistem Python paketlerini kullanan `guardian` Python sanal ortamını oluşturur.
 6. Ağ arayüzü, honeypot portları ve log dizinini yapılandırır.
-7. Docker Compose ile Dionaea'yı başlatır; 4. CPU ve 1 GB RAM limiti uygular. Mevcut sabit Dionaea imajı amd64 olduğundan Pi 5 üzerinde qemu/binfmt ile çalıştırılır.
+7. Docker Compose ile Dionaea'yı başlatır; CPU ve 256 MB RAM limiti uygular. Mevcut sabit Dionaea imajı amd64 olduğundan Pi 5 üzerinde qemu/binfmt ile çalıştırılır.
 8. NetworkManager dispatcher, guardian servisi ve log arşiv timer'ını etkinleştirir.
 9. fail2ban ve zorunlu SSH MFA yapılandırmasını kurar. Kurulumdan önce kurulum kullanıcısı için `google-authenticator` çalıştırılmalıdır.
 10. OpenSSH yoksa kurar; mevcut kullanıcı adı korunur, SSH parola doğrulaması kapatılır ve PAM üzerinden MFA zorunlu kılınır.
@@ -108,6 +108,65 @@ Olay logları `/opt/guardian/logs/active/events.jsonl` altında tutulur.
 - Mevcut sabit Dionaea imajı amd64'tür ve Pi 5'te qemu/binfmt emülasyonu ile çalışır. Bu yerel imajdan daha yavaş olabilir; üretimde arm64 uyumlu, doğrulanmış bir imaj bulunduğunda `platform` ve digest birlikte güncellenmelidir.
 - Olay logu 100 MB'a ulaştığında `.1` dosyasına döndürülür; ayrıca filesystem kullanımı %90'a ulaşırsa health check başarısız olur.
 - Egress karantinasını geri almak için `/opt/guardian/network/iptables_rules.sh remove` kullanılabilir.
+
+## Pi 5 işletim özellikleri
+
+### Sıcaklık
+
+`vcgencmd` ile CPU sıcaklığı beş dakikada bir `/var/log/guardian/temperature.log`
+dosyasına yazılır. 80°C `WARNING`, 85°C `CRITICAL` olarak kaydedilir:
+
+```bash
+systemctl status guardian-temperature.timer
+systemctl start guardian-temperature.service
+```
+
+### Log2RAM
+
+`/var/log/guardian` 128 MB tmpfs olarak tutulur ve RAM logları saatlik olarak
+`/opt/guardian/logs/guardian-ram/latest.tar.gz` dosyasına yazılır. Ayar
+`/etc/log2ram.conf` içinde `SIZE=128M` olarak oluşturulur.
+
+### Kaynak sınırları ve watchdog
+
+`guardian-core` için `MemoryMax=300M`, `MemorySwapMax=100M`, `WatchdogSec=60`,
+`RuntimeMaxSec=86400` ve otomatik yeniden başlatma aktiftir. Python, her 30 saniyede
+watchdog bildirimi gönderir; her beş dakikada `gc.collect()` ve nesne sayısını olay
+loguna yazar.
+
+### Ağ arayüzü geçişi
+
+NetworkManager dispatcher; Ethernet/Wi-Fi geçişinde egress kurallarını uygular ve
+`guardian-core` servisini yeniden başlatır:
+
+```bash
+systemctl status guardian-core.service
+```
+
+### SQLite bakımı
+
+Olaylar WAL modunda `/opt/guardian/data/events.db` içinde tutulur. Aylık timer,
+183 günden eski kayıtları `/opt/guardian/logs/archive` altındaki arşiv veritabanına
+aktarır ve ardından `VACUUM` çalıştırır:
+
+```bash
+systemctl status guardian-sqlite-maintenance.timer
+systemctl start guardian-sqlite-maintenance.service
+```
+
+### Güvenlik güncellemeleri
+
+`unattended-upgrades` yalnızca Ubuntu güvenlik deposunu kullanır, otomatik yeniden
+başlatmayı kapalı tutar ve güncelleme olaylarını syslog/journald'a yazar.
+
+### Yerel health API
+
+Flask servisi yalnızca `127.0.0.1:8765` üzerinde `/health` endpoint'i sunar:
+
+```bash
+systemctl status guardian-health.service
+curl http://127.0.0.1:8765/health
+```
 
 Egress kuralları Docker'ın `DOCKER-USER` zincirinde uygulanır. Mevcut host firewall kuralları silinmez. İkincil arayüz bağlandığında, `PRIMARY_INTERFACE` seçilmişse o arayüzdeki default route kaldırılır; bu nedenle kurulum sırasında yönetim bağlantısının birincil arayüzünü doğru seçin.
 

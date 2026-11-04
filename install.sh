@@ -46,7 +46,7 @@ readonly PACKAGES=(
   iw libpcap-dev tcpdump tshark fail2ban docker.io file
   libpam-google-authenticator
   docker-compose-v2 qemu-user-static binfmt-support python3-pip python3-venv
-  python3-full openssh-server
+  python3-full openssh-server unattended-upgrades
 )
 
 ensure_line() {
@@ -94,7 +94,9 @@ prepare_layout() {
   log "Guardian dizinleri hazırlanıyor..."
   install -d -m 0755 "${APP_ROOT}" "${APP_ROOT}/core" "${APP_ROOT}/docker"
   install -d -m 0755 "${CONFIG_DIR}" "${APP_ROOT}/scripts" "${APP_ROOT}/network"
+  install -d -m 0750 "${APP_ROOT}/data"
   install -d -m 0755 "${ACTIVE_LOG_DIR}" "${ARCHIVE_LOG_DIR}"
+  chown root:"${SERVICE_USER}" "${ACTIVE_LOG_DIR}"
   install -d -o root -g root -m 0700 "${SAMPLE_DIR}"
   install -d -m 0750 "${ACTIVE_LOG_DIR}/dionaea"
 
@@ -114,6 +116,7 @@ install_application() {
   install -m 0644 "${REPO_ROOT}/core/logger.py" "${APP_ROOT}/core/logger.py"
   install -m 0644 "${REPO_ROOT}/core/sniffer.py" "${APP_ROOT}/core/sniffer.py"
   install -m 0644 "${REPO_ROOT}/core/dashboard.py" "${APP_ROOT}/core/dashboard.py"
+  install -m 0644 "${REPO_ROOT}/core/health.py" "${APP_ROOT}/core/health.py"
   install -m 0644 "${REPO_ROOT}/requirements.txt" "${APP_ROOT}/requirements.txt"
 
   python3 -m venv "${APP_ROOT}/venv"
@@ -218,6 +221,7 @@ configure_network_and_services() {
 INTERFACE=auto
 PRIMARY_INTERFACE=auto
 EVENT_LOG=${ACTIVE_LOG_DIR}/events.jsonl
+EVENT_DB=${APP_ROOT}/data/events.db
 PORT_SCAN_THRESHOLD=20
 CONNECTION_RATE_THRESHOLD=60
 WINDOW_SECONDS=60
@@ -270,6 +274,7 @@ state="${2:-unknown}"
 } >> "${LOG}"
 if [[ "${state}" == "up" || "${state}" == "dhcp4-change" || "${state}" == "connectivity-change" ]]; then
   /opt/guardian/network/iptables_rules.sh apply 2>/dev/null || true
+  systemctl try-restart guardian-core.service 2>/dev/null || true
 fi
 EOF
   chown root:root /etc/NetworkManager/dispatcher.d/99-honeypot-adapt.sh
@@ -300,19 +305,25 @@ After=network-online.target docker.service
 Wants=network-online.target
 
 [Service]
-Type=simple
+Type=notify
 WorkingDirectory=/opt/guardian/core
 ExecStartPre=/usr/bin/docker compose -f /opt/guardian/docker/docker-compose.yml up -d
 ExecStartPre=/opt/guardian/network/iptables_rules.sh apply
 ExecStart=/opt/guardian/venv/bin/python3 /opt/guardian/core/sniffer.py --config /opt/guardian/config/guardian.conf
 CPUAffinity=1 2
-Restart=on-failure
-RestartSec=5
+Restart=always
+RestartSec=10
+RuntimeMaxSec=86400
+MemoryMax=300M
+MemorySwapMax=100M
+WatchdogSec=60
+NotifyAccess=main
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/opt/guardian/logs/active
+ReadWritePaths=/opt/guardian/data
 
 [Install]
 WantedBy=multi-user.target
@@ -320,6 +331,56 @@ EOF
   systemctl daemon-reload
   systemctl enable guardian-core.service
   systemctl enable --now guardian-healthcheck.timer
+  install -m 0644 "${REPO_ROOT}/service/guardian-health.service" \
+    /etc/systemd/system/guardian-health.service
+  systemctl daemon-reload
+  systemctl enable --now guardian-health.service
+}
+
+configure_auxiliary_services() {
+  log "Sıcaklık, log2ram, SQLite ve güncelleme servisleri yapılandırılıyor..."
+  install -d -m 0750 /var/log/guardian
+  install -m 0755 "${REPO_ROOT}/scripts/temperature-monitor.sh" \
+    /usr/local/sbin/guardian-temperature-monitor.sh
+  install -m 0755 "${REPO_ROOT}/scripts/log2ram-sync.sh" \
+    /usr/local/sbin/guardian-log2ram-sync.sh
+  install -d -m 0755 /usr/local/lib/guardian
+  install -m 0755 "${REPO_ROOT}/scripts/sqlite-maintenance.py" \
+    /usr/local/lib/guardian/sqlite-maintenance.py
+  install -m 0644 "${REPO_ROOT}/service/guardian-temperature.service" \
+    /etc/systemd/system/guardian-temperature.service
+  install -m 0644 "${REPO_ROOT}/service/guardian-temperature.timer" \
+    /etc/systemd/system/guardian-temperature.timer
+  install -m 0644 "${REPO_ROOT}/service/guardian-log2ram-sync.service" \
+    /etc/systemd/system/guardian-log2ram-sync.service
+  install -m 0644 "${REPO_ROOT}/service/guardian-log2ram-sync.timer" \
+    /etc/systemd/system/guardian-log2ram-sync.timer
+  install -m 0644 "${REPO_ROOT}/service/guardian-sqlite-maintenance.service" \
+    /etc/systemd/system/guardian-sqlite-maintenance.service
+  install -m 0644 "${REPO_ROOT}/service/guardian-sqlite-maintenance.timer" \
+    /etc/systemd/system/guardian-sqlite-maintenance.timer
+  cat > /etc/log2ram.conf <<'EOF'
+SIZE=128M
+EOF
+  ensure_line "tmpfs /var/log/guardian tmpfs rw,nosuid,nodev,noexec,size=128M,mode=0750 0 0" /etc/fstab
+  mountpoint -q /var/log/guardian || mount /var/log/guardian
+  install -d -m 0755 /etc/apt/apt.conf.d
+  cat > /etc/apt/apt.conf.d/20auto-upgrades <<'EOF'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+APT::Periodic::AutocleanInterval "7";
+EOF
+  cat > /etc/apt/apt.conf.d/52unattended-upgrades-guardian <<'EOF'
+Unattended-Upgrade::Allowed-Origins {
+  "${distro_id}:${distro_codename}-security";
+};
+Unattended-Upgrade::Automatic-Reboot "false";
+Unattended-Upgrade::SyslogEnable "true";
+EOF
+  systemctl daemon-reload
+  systemctl enable --now unattended-upgrades
+  systemctl enable --now guardian-temperature.timer guardian-log2ram-sync.timer
+  systemctl enable --now guardian-sqlite-maintenance.timer
 }
 
 configure_archiving() {
@@ -354,6 +415,7 @@ main() {
   configure_memory
   configure_kernel_and_watchdog
   configure_network_and_services
+  configure_auxiliary_services
   configure_archiving
   configure_ssh
   [[ "$(hostname)" == "${ORIGINAL_HOSTNAME}" ]] ||

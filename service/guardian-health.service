@@ -1,0 +1,19 @@
+[Unit]
+Description=Local Guardian health API
+After=network.target guardian-core.service
+
+[Service]
+Type=simple
+User=guardian
+WorkingDirectory=/opt/guardian/core
+Environment=GUARDIAN_EVENT_LOG=/opt/guardian/logs/active/events.jsonl
+ExecStart=/opt/guardian/venv/bin/python3 /opt/guardian/core/health.py
+Restart=always
+RestartSec=10
+MemoryMax=64M
+MemorySwapMax=32M
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
