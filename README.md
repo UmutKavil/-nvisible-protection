@@ -12,7 +12,7 @@ Raspberry Pi 5 üzerinde çalışan, Dionaea honeypot ve Scapy tabanlı ağ göz
 - Ethernet/Wi-Fi arayüz değişikliklerine uyum
 - Günlük logların `pigz` ile arşivlenmesi
 - systemd ile otomatik başlatma
-- zstd ZRAM, 4 GB swapfile, swapspace ve watchdog
+- zstd ZRAM, 2 GB swapfile ve watchdog
 - SYN flood/sysctl korumaları
 - RFC1918 egress engeli ve izole malware örnek dizini
 - fail2ban ve Google Authenticator için SSH MFA hazırlığı
@@ -41,14 +41,14 @@ Kurulum scripti:
 
 1. Ubuntu Server 24.04 ve 64-bit arm64 mimariyi doğrular.
 2. Gerekli sistem paketlerini kurar.
-3. earlyoom'u kaldırır/maskeler; zstd ZRAM, 4 GB swapfile, swapspace ve watchdog'u etkinleştirir.
+3. earlyoom'u kaldırır/maskeler; zstd ZRAM, 2 GB swapfile ve watchdog'u etkinleştirir.
 4. `/etc/sysctl.d/99-guardian.conf` ile çekirdek ağ ve bellek korumalarını uygular.
 5. Sistem Python paketlerini kullanan `guardian` Python sanal ortamını oluşturur.
 6. Ağ arayüzü, honeypot portları ve log dizinini yapılandırır.
-7. Docker Compose ile Dionaea'yı başlatır; 4. CPU ve 1 GB RAM limiti uygular.
+7. Docker Compose ile Dionaea'yı başlatır; 4. CPU ve 1 GB RAM limiti uygular. Mevcut sabit Dionaea imajı amd64 olduğundan Pi 5 üzerinde qemu/binfmt ile çalıştırılır.
 8. NetworkManager dispatcher, guardian servisi ve log arşiv timer'ını etkinleştirir.
-9. fail2ban ve SSH MFA hazırlığını kurar.
-10. OpenSSH yoksa kurar; mevcut kullanıcı adı ve sistem parolası değiştirilmeden SSH'ı etkinleştirir.
+9. fail2ban ve zorunlu SSH MFA yapılandırmasını kurar. Kurulumdan önce kurulum kullanıcısı için `google-authenticator` çalıştırılmalıdır.
+10. OpenSSH yoksa kurar; mevcut kullanıcı adı korunur, SSH parola doğrulaması kapatılır ve PAM üzerinden MFA zorunlu kılınır.
 11. Mevcut cihaz hostname'ini doğrular; isim değişmişse kurulumu hata ile durdurur.
 12. Servislerin durumunu ve temel health check sonuçlarını gösterir.
 
@@ -83,9 +83,10 @@ Olay logları `/opt/guardian/logs/active/events.jsonl` altında tutulur.
 - `guardian-core` root olarak çalışır çünkü paket yakalama ve ağ bilgisi için yetki gerekir. Python kodu kullanıcı girdisini komut olarak çalıştırmaz.
 - Honeypot yönetimi için Docker socket konteynere bağlanmaz.
 - Malware örnekleri `/opt/guardian/malware_samples` altında `0700` izinlerle tutulur.
-- Google Authenticator PAM satırı `nullok` ile hazırlanır; MFA otomatik zorlanmaz. Kullanıcı için `google-authenticator` çalıştırıp mevcut SSH oturumu doğrulandıktan sonra `AuthenticationMethods publickey,keyboard-interactive:pam` satırını etkinleştirin.
-- SSH parola erişimi mevcut sistem parolasıyla kullanılır. Kurulum kullanıcı adını veya parolasını değiştirmez.
+- Kurulumdan önce SSH kullanıcısı için `google-authenticator` çalıştırılmalıdır. Kurulum, `~/.google_authenticator` yoksa MFA etkinleştirmeden durur.
+- SSH parola doğrulaması kapalıdır; `keyboard-interactive:pam` üzerinden sistem parolası ve Google Authenticator kodu birlikte istenir. Kurulum kullanıcı adı veya parolası değiştirilmez.
 - `config/guardian.conf` içindeki `EGRESS_QUARANTINE` ve `AVAHI_ENABLED` ayarlarını bilinçli değiştirin.
+- Mevcut sabit Dionaea imajı amd64'tür ve Pi 5'te qemu/binfmt emülasyonu ile çalışır. Bu yerel imajdan daha yavaş olabilir; üretimde arm64 uyumlu, doğrulanmış bir imaj bulunduğunda `platform` ve digest birlikte güncellenmelidir.
 
 Egress kuralları Docker'ın `DOCKER-USER` zincirinde uygulanır. Mevcut host firewall kuralları silinmez. İkincil arayüz bağlandığında, `PRIMARY_INTERFACE` seçilmişse o arayüzdeki default route kaldırılır; bu nedenle kurulum sırasında yönetim bağlantısının birincil arayüzünü doğru seçin.
 

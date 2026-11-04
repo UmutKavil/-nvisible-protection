@@ -31,9 +31,10 @@ export NEEDRESTART_MODE=a
 
 readonly PACKAGES=(
   build-essential pigz htop iotop git curl wget jq zram-tools watchdog irqbalance
-  swapspace network-manager avahi-daemon avahi-utils iproute2 iptables
+  network-manager avahi-daemon avahi-utils iproute2 iptables
   iw libpcap-dev tcpdump tshark fail2ban libpam-google-authenticator docker.io
-  docker-compose python3-pip python3-venv python3-full openssh-server
+  docker-compose-v2 qemu-user-static binfmt-support python3-pip python3-venv
+  python3-full openssh-server
 )
 
 ensure_line() {
@@ -47,6 +48,9 @@ install_packages() {
   echo "wireshark-common wireshark-common/install-setuid boolean true" | debconf-set-selections
   log "Paketler kuruluyor..."
   apt-get install -y "${PACKAGES[@]}"
+  docker compose version >/dev/null 2>&1 ||
+    die "Docker Compose v2 kurulamadı; docker-compose-v2 paketini doğrulayın."
+  systemctl enable --now binfmt-support 2>/dev/null || true
   apt-get purge -y earlyoom 2>/dev/null || true
   systemctl disable --now earlyoom.service 2>/dev/null || true
   systemctl mask earlyoom.service 2>/dev/null || true
@@ -79,8 +83,8 @@ install_application() {
   install -m 0644 "${REPO_ROOT}/requirements.txt" "${APP_ROOT}/requirements.txt"
 
   python3 -m venv "${APP_ROOT}/venv"
-  "${APP_ROOT}/venv/bin/pip" install --upgrade pip
-  "${APP_ROOT}/venv/bin/pip" install scapy rich psutil
+  "${APP_ROOT}/venv/bin/pip" install --require-hashes --no-cache-dir \
+    -r "${APP_ROOT}/requirements.txt"
   chown -R root:root "${APP_ROOT}/venv" "${APP_ROOT}/core"
 }
 
@@ -96,10 +100,18 @@ configure_ssh() {
     die "Kurulum kullanıcısı bulunamadı: ${login_user}"
 
   SSH_LOGIN_USER="${login_user}"
+  local login_home
+  login_home="$(getent passwd "${login_user}" | cut -d: -f6)"
+  [[ -n "${login_home}" && -f "${login_home}/.google_authenticator" ]] ||
+    die "MFA kaydı bulunamadı: önce ${login_user} için google-authenticator çalıştırın."
+  chown "${login_user}:${login_user}" "${login_home}/.google_authenticator"
+  chmod 600 "${login_home}/.google_authenticator"
+
   install -d -m 0755 /etc/ssh/sshd_config.d
   cat > /etc/ssh/sshd_config.d/99-guardian-access.conf <<'EOF'
-PasswordAuthentication yes
+PasswordAuthentication no
 KbdInteractiveAuthentication yes
+AuthenticationMethods keyboard-interactive:pam
 UsePAM yes
 EOF
   /usr/sbin/sshd -t
@@ -110,7 +122,7 @@ EOF
 configure_memory() {
   log "Swap ve ZRAM yapılandırılıyor..."
   if [[ ! -f "${SWAPFILE}" ]]; then
-    dd if=/dev/zero of="${SWAPFILE}" bs=1M count=4096 status=none
+    dd if=/dev/zero of="${SWAPFILE}" bs=1M count=2048 status=none
   fi
   chmod 600 "${SWAPFILE}"
   mkswap "${SWAPFILE}" >/dev/null
@@ -125,12 +137,7 @@ EOF
   systemctl restart zramswap.service 2>/dev/null ||
     systemctl restart zram-tools.service 2>/dev/null || true
 
-  cat > /etc/swapspace.conf <<'EOF'
-chunk_size=2048m
-max_swap_size=16384m
-min_free_space=20480m
-EOF
-  systemctl enable --now swapspace
+  systemctl disable --now swapspace 2>/dev/null || true
 }
 
 configure_kernel_and_watchdog() {
@@ -161,6 +168,8 @@ EOF
 
 configure_network_and_services() {
   log "Docker, ağ, Avahi, fail2ban ve systemd yapılandırılıyor..."
+  systemctl enable --now NetworkManager docker fail2ban
+  systemctl enable --now binfmt-support 2>/dev/null || true
   install -m 0644 "${REPO_ROOT}/docker/docker-compose.yml" "${APP_ROOT}/docker/docker-compose.yml"
   cat > "${CONFIG_DIR}/guardian.conf" <<EOF
 INTERFACE=auto
@@ -199,6 +208,11 @@ case "${1:-apply}" in
 esac
 EOF
   chmod 755 "${APP_ROOT}/network/iptables_rules.sh"
+  docker compose -f "${APP_ROOT}/docker/docker-compose.yml" config >/dev/null ||
+    die "Dionaea Docker Compose yapılandırması geçersiz."
+  docker pull --platform linux/amd64 \
+    "dinotools/dionaea@sha256:6f06d0a6035c865cb60ef51bd96ff3b1f25ee4bfcd852dad3f551bc2d93464ca" ||
+    die "Dionaea amd64 imajı indirilemedi; qemu/binfmt veya ağ bağlantısını doğrulayın."
 
   cat > /etc/NetworkManager/dispatcher.d/99-honeypot-adapt.sh <<'EOF'
 #!/usr/bin/env bash
@@ -212,11 +226,6 @@ state="${2:-unknown}"
   ip -4 route show dev "${interface}" 2>/dev/null || true
 } >> "${LOG}"
 if [[ "${state}" == "up" || "${state}" == "dhcp4-change" || "${state}" == "connectivity-change" ]]; then
-  if [[ "${interface}" == "eth0" ]]; then
-    while ip route del default dev wlan0 2>/dev/null; do :; done
-  elif [[ "${interface}" == "wlan0" ]]; then
-    while ip route del default dev eth0 2>/dev/null; do :; done
-  fi
   /opt/guardian/network/iptables_rules.sh apply 2>/dev/null || true
 fi
 EOF
@@ -237,9 +246,9 @@ maxretry = 5
 enabled = true
 EOF
   cat > /etc/pam.d/guardian-google-authenticator <<'EOF'
-auth required pam_google_authenticator.so nullok
+auth required pam_google_authenticator.so
 EOF
-  ensure_line "auth required pam_google_authenticator.so nullok" /etc/pam.d/sshd
+  ensure_line "auth required pam_google_authenticator.so" /etc/pam.d/sshd
 
   cat > /etc/systemd/system/guardian-core.service <<'EOF'
 [Unit]
@@ -266,7 +275,6 @@ ReadWritePaths=/opt/guardian/logs/active
 WantedBy=multi-user.target
 EOF
   systemctl daemon-reload
-  systemctl enable --now NetworkManager docker fail2ban
   systemctl enable guardian-core.service
 }
 

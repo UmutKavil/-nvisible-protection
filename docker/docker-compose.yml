@@ -1,6 +1,7 @@
 services:
   dionaea:
-    image: dinotools/dionaea:latest
+    platform: linux/amd64
+    image: dinotools/dionaea@sha256:6f06d0a6035c865cb60ef51bd96ff3b1f25ee4bfcd852dad3f551bc2d93464ca
     container_name: invisible-dionaea
     restart: unless-stopped
     cpuset: "3"

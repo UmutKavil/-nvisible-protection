@@ -21,7 +21,7 @@ class AnomalyDetector:
         self.scan_threshold = scan_threshold
         self.rate_threshold = rate_threshold
         self.window = window
-        self.ports_by_source: dict[str, set[int]] = defaultdict(set)
+        self.ports_by_source: dict[str, dict[int, float]] = defaultdict(dict)
         self.recent_connections: deque[tuple[float, str]] = deque()
         self.last_alert: dict[tuple[str, str], float] = {}
 
@@ -36,10 +36,15 @@ class AnomalyDetector:
             self.recent_connections.popleft()
         if packet.haslayer(TCP):
             port = int(packet[TCP].dport)
-            self.ports_by_source[source].add(port)
-            self._alert_once("port_scan", source, len(self.ports_by_source[source]) >= self.scan_threshold,
+            ports = self.ports_by_source[source]
+            expired_ports = [seen_port for seen_port, seen_at in ports.items()
+                             if now - seen_at > self.window]
+            for expired_port in expired_ports:
+                del ports[expired_port]
+            ports[port] = now
+            self._alert_once("port_scan", source, len(ports) >= self.scan_threshold,
                              source_ip=source, destination_ip=destination,
-                             unique_ports=len(self.ports_by_source[source]))
+                             unique_ports=len(ports))
         rate = sum(item_source == source for _, item_source in self.recent_connections)
         self._alert_once("connection_rate", source, rate >= self.rate_threshold,
                          source_ip=source, connections=rate, window_seconds=self.window)
