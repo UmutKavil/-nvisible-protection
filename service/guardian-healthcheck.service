@@ -1,0 +1,8 @@
+[Unit]
+Description=Guardian runtime health check
+After=guardian-core.service
+Requires=guardian-core.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/guardian-healthcheck.sh

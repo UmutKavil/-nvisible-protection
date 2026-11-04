@@ -11,6 +11,12 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /opt/dionaea/var/log/dionaea/dionaea.log || test -d /opt/dionaea/var/lib"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     ports:
       - "21:21"
       - "22:22"

@@ -17,7 +17,16 @@ SSH_LOGIN_USER=""
 log() { printf '[guardian-install] %s\n' "$*"; }
 warn() { printf '[guardian-install][WARN] %s\n' "$*" >&2; }
 die() { printf '[guardian-install][ERROR] %s\n' "$*" >&2; exit 1; }
-trap 'die "Kurulum ${BASH_SOURCE[0]}:${LINENO} satırında başarısız oldu."' ERR
+on_error() {
+  local exit_code=$?
+  printf '[guardian-install][ERROR] Kurulum başarısız oldu (satır %s, çıkış kodu %s).\n' \
+    "${BASH_LINENO[0]}" "${exit_code}" >&2
+  printf '[guardian-install][ERROR] Başarısız komut: %s\n' "${BASH_COMMAND}" >&2
+  printf '[guardian-install][ERROR] Sebep genellikle yukarıdaki paket, izin, disk, ağ veya servis hatasıdır.\n' >&2
+  printf '[guardian-install][ERROR] Yeniden denemeden önce: journalctl -xe, systemctl --failed ve df -h çıktısını kontrol edin.\n' >&2
+  exit "${exit_code}"
+}
+trap on_error ERR
 
 [[ "${EUID}" -eq 0 ]] || die "Root yetkisi gerekli: sudo ./install.sh"
 [[ "$(uname -m)" == "aarch64" ]] || die "Raspberry Pi 5 Ubuntu arm64/aarch64 gereklidir."
@@ -25,6 +34,8 @@ trap 'die "Kurulum ${BASH_SOURCE[0]}:${LINENO} satırında başarısız oldu."' 
 # shellcheck disable=SC1091
 source /etc/os-release
 [[ "${ID:-}" == "ubuntu" ]] || die "Ubuntu Server gereklidir: ${PRETTY_NAME:-bilinmiyor}"
+[[ "${VERSION_ID:-}" == "24.04" ]] ||
+  die "Ubuntu 24.04 gereklidir; bulunan sürüm: ${PRETTY_NAME:-bilinmiyor}"
 
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
@@ -32,7 +43,8 @@ export NEEDRESTART_MODE=a
 readonly PACKAGES=(
   build-essential pigz htop iotop git curl wget jq zram-tools watchdog irqbalance
   network-manager avahi-daemon avahi-utils iproute2 iptables
-  iw libpcap-dev tcpdump tshark fail2ban libpam-google-authenticator docker.io
+  iw libpcap-dev tcpdump tshark fail2ban docker.io file
+  libpam-google-authenticator
   docker-compose-v2 qemu-user-static binfmt-support python3-pip python3-venv
   python3-full openssh-server
 )
@@ -42,12 +54,34 @@ ensure_line() {
   grep -qxF "${line}" "${file}" 2>/dev/null || printf '%s\n' "${line}" >> "${file}"
 }
 
+preflight_checks() {
+  log "Kurulum ön koşulları kontrol ediliyor..."
+  local free_kb ram_kb
+  free_kb="$(df -Pk / | awk 'NR == 2 {print $4}')"
+  [[ "${free_kb}" =~ ^[0-9]+$ && "${free_kb}" -ge 8388608 ]] ||
+    die "Kök dosya sisteminde en az 8 GB boş alan gerekir. Çözüm: df -h ile alanı kontrol edin."
+  ram_kb="$(awk '/MemTotal:/ {print $2}' /proc/meminfo)"
+  [[ "${ram_kb}" =~ ^[0-9]+$ && "${ram_kb}" -ge 3145728 ]] ||
+    die "En az 3 GB RAM gerekir. 4 GB veya 8 GB Pi 5 modeli kullanın."
+  command -v systemctl >/dev/null ||
+    die "systemctl bulunamadı; systemd tabanlı Ubuntu Server kullanın."
+  command -v apt-get >/dev/null ||
+    die "apt-get bulunamadı; desteklenen Ubuntu Server kurulumu kullanın."
+  getent hosts archive.ubuntu.com >/dev/null ||
+    die "Ubuntu paket deposu çözümlenemiyor. Ağ bağlantısı ve DNS ayarlarını kontrol edin."
+  getent hosts registry-1.docker.io >/dev/null ||
+    die "Docker Hub çözümlenemiyor. Ağ bağlantısı ve DNS ayarlarını kontrol edin."
+  if command -v fuser >/dev/null && fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; then
+    die "Başka bir apt/dpkg işlemi çalışıyor. İşlem bitince kurulumu yeniden başlatın."
+  fi
+}
+
 install_packages() {
   log "Paket listesi güncelleniyor..."
-  apt-get update
+  apt-get -o Acquire::Retries=3 update
   echo "wireshark-common wireshark-common/install-setuid boolean true" | debconf-set-selections
   log "Paketler kuruluyor..."
-  apt-get install -y "${PACKAGES[@]}"
+  apt-get -o Acquire::Retries=3 install -y "${PACKAGES[@]}"
   docker compose version >/dev/null 2>&1 ||
     die "Docker Compose v2 kurulamadı; docker-compose-v2 paketini doğrulayın."
   systemctl enable --now binfmt-support 2>/dev/null || true
@@ -123,9 +157,12 @@ configure_memory() {
   log "Swap ve ZRAM yapılandırılıyor..."
   if [[ ! -f "${SWAPFILE}" ]]; then
     dd if=/dev/zero of="${SWAPFILE}" bs=1M count=2048 status=none
+    chmod 600 "${SWAPFILE}"
+    mkswap "${SWAPFILE}" >/dev/null
+  elif ! file "${SWAPFILE}" 2>/dev/null | grep -q 'swap file'; then
+    die "${SWAPFILE} mevcut fakat swap dosyası değil. Dosyayı inceleyip taşıyın veya kaldırın."
   fi
   chmod 600 "${SWAPFILE}"
-  mkswap "${SWAPFILE}" >/dev/null
   ensure_line "${SWAPFILE} none swap sw 0 0" /etc/fstab
   swapon -p 10 "${SWAPFILE}" 2>/dev/null || true
 
@@ -171,6 +208,12 @@ configure_network_and_services() {
   systemctl enable --now NetworkManager docker fail2ban
   systemctl enable --now binfmt-support 2>/dev/null || true
   install -m 0644 "${REPO_ROOT}/docker/docker-compose.yml" "${APP_ROOT}/docker/docker-compose.yml"
+  install -m 0755 "${REPO_ROOT}/scripts/guardian-healthcheck.sh" \
+    /usr/local/sbin/guardian-healthcheck.sh
+  install -m 0644 "${REPO_ROOT}/service/guardian-healthcheck.service" \
+    /etc/systemd/system/guardian-healthcheck.service
+  install -m 0644 "${REPO_ROOT}/service/guardian-healthcheck.timer" \
+    /etc/systemd/system/guardian-healthcheck.timer
   cat > "${CONFIG_DIR}/guardian.conf" <<EOF
 INTERFACE=auto
 PRIMARY_INTERFACE=auto
@@ -276,6 +319,7 @@ WantedBy=multi-user.target
 EOF
   systemctl daemon-reload
   systemctl enable guardian-core.service
+  systemctl enable --now guardian-healthcheck.timer
 }
 
 configure_archiving() {
@@ -303,6 +347,7 @@ EOF
 }
 
 main() {
+  preflight_checks
   install_packages
   prepare_layout
   install_application

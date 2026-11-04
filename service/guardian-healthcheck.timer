@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Guardian runtime health check
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+Unit=guardian-healthcheck.service
+
+[Install]
+WantedBy=timers.target

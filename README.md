@@ -37,6 +37,22 @@ cd ~/invisible-protection
 sudo ./install.sh
 ```
 
+Kurulum başlamadan önce script; Ubuntu 24.04 arm64, en az 3 GB RAM, 8 GB boş disk,
+DNS/ağ bağlantısı ve aktif apt/dpkg işlemi kontrolü yapar. Kontrollerden biri
+başarısız olursa kurulum değişiklik yapmadan durur. Kurulum sırasında hata oluşursa
+çıktıda başarısız satır ve komut gösterilir. Yeniden denemeden önce şu komutlarla
+durumu inceleyin:
+
+```bash
+df -h
+free -h
+systemctl --failed
+journalctl -xe --no-pager
+```
+
+Kurulum güvenli şekilde tekrar çalıştırılabilir. Mevcut `/swapfile` swap dosyası
+değilse script bunu açıkça bildirir ve üzerine yazmaz.
+
 Kurulum scripti:
 
 1. Ubuntu Server 24.04 ve 64-bit arm64 mimariyi doğrular.
@@ -51,6 +67,7 @@ Kurulum scripti:
 10. OpenSSH yoksa kurar; mevcut kullanıcı adı korunur, SSH parola doğrulaması kapatılır ve PAM üzerinden MFA zorunlu kılınır.
 11. Mevcut cihaz hostname'ini doğrular; isim değişmişse kurulumu hata ile durdurur.
 12. Servislerin durumunu ve temel health check sonuçlarını gösterir.
+13. Dionaea, disk kullanımı ve olay logu için iki dakikada bir health check çalıştırır.
 
 Kurulum sırasında egress karantinası, Avahi kamuflajı ve birincil arayüz seçimi istenir. Egress ve Avahi varsayılan olarak kapalıdır. RFC1918 yönlerine giden Docker trafiği her durumda engellenir.
 
@@ -60,6 +77,8 @@ Kurulum sırasında egress karantinası, Avahi kamuflajı ve birincil arayüz se
 systemctl status guardian-core.service
 systemctl status guardian-log-archive.timer
 docker compose -f /opt/guardian/docker/docker-compose.yml ps
+systemctl status guardian-healthcheck.timer
+systemctl start guardian-healthcheck.service
 ```
 
 Kurulum tamamlandığında mevcut SSH kullanıcı adı gösterilir; kullanıcı adı veya parola değiştirilmez:
@@ -87,6 +106,8 @@ Olay logları `/opt/guardian/logs/active/events.jsonl` altında tutulur.
 - SSH parola doğrulaması kapalıdır; `keyboard-interactive:pam` üzerinden sistem parolası ve Google Authenticator kodu birlikte istenir. Kurulum kullanıcı adı veya parolası değiştirilmez.
 - `config/guardian.conf` içindeki `EGRESS_QUARANTINE` ve `AVAHI_ENABLED` ayarlarını bilinçli değiştirin.
 - Mevcut sabit Dionaea imajı amd64'tür ve Pi 5'te qemu/binfmt emülasyonu ile çalışır. Bu yerel imajdan daha yavaş olabilir; üretimde arm64 uyumlu, doğrulanmış bir imaj bulunduğunda `platform` ve digest birlikte güncellenmelidir.
+- Olay logu 100 MB'a ulaştığında `.1` dosyasına döndürülür; ayrıca filesystem kullanımı %90'a ulaşırsa health check başarısız olur.
+- Egress karantinasını geri almak için `/opt/guardian/network/iptables_rules.sh remove` kullanılabilir.
 
 Egress kuralları Docker'ın `DOCKER-USER` zincirinde uygulanır. Mevcut host firewall kuralları silinmez. İkincil arayüz bağlandığında, `PRIMARY_INTERFACE` seçilmişse o arayüzdeki default route kaldırılır; bu nedenle kurulum sırasında yönetim bağlantısının birincil arayüzünü doğru seçin.
 
