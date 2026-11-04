@@ -1,0 +1,21 @@
+[Unit]
+Description=Guardian localhost events API
+After=guardian-core.service
+
+[Service]
+Type=simple
+User=guardian
+WorkingDirectory=/opt/guardian/web
+Environment=PYTHONPATH=/opt/guardian/storage
+Environment=GUARDIAN_EVENT_DB=/opt/guardian/data/events.db
+EnvironmentFile=-/etc/guardian/web.env
+ExecStart=/opt/guardian/venv/bin/python3 /opt/guardian/web/api.py
+Restart=always
+RestartSec=10
+MemoryMax=64M
+MemorySwapMax=32M
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

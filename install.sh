@@ -43,7 +43,7 @@ export NEEDRESTART_MODE=a
 readonly PACKAGES=(
   build-essential pigz htop iotop git curl wget jq zram-tools watchdog irqbalance
   network-manager avahi-daemon avahi-utils iproute2 iptables
-  iw libpcap-dev tcpdump tshark fail2ban docker.io file
+  iw libpcap-dev tcpdump tshark fail2ban docker.io file openssl
   libpam-google-authenticator
   docker-compose-v2 qemu-user-static binfmt-support python3-pip python3-venv
   python3-full openssh-server unattended-upgrades
@@ -94,8 +94,9 @@ prepare_layout() {
   log "Guardian dizinleri hazırlanıyor..."
   install -d -m 0755 "${APP_ROOT}" "${APP_ROOT}/core" "${APP_ROOT}/docker"
   install -d -m 0755 "${CONFIG_DIR}" "${APP_ROOT}/scripts" "${APP_ROOT}/network"
-  install -d -m 0750 "${APP_ROOT}/data"
-  install -d -m 0755 "${ACTIVE_LOG_DIR}" "${ARCHIVE_LOG_DIR}"
+  install -d -o root -g "${SERVICE_USER}" -m 0750 "${APP_ROOT}/data"
+  install -d -m 0750 "${ACTIVE_LOG_DIR}" "${ARCHIVE_LOG_DIR}"
+  chown root:"${SERVICE_USER}" "${ACTIVE_LOG_DIR}" "${ARCHIVE_LOG_DIR}"
   chown root:"${SERVICE_USER}" "${ACTIVE_LOG_DIR}"
   install -d -o root -g root -m 0700 "${SAMPLE_DIR}"
   install -d -m 0750 "${ACTIVE_LOG_DIR}/dionaea"
@@ -115,14 +116,22 @@ install_application() {
   install -m 0644 "${REPO_ROOT}/core/config.py" "${APP_ROOT}/core/config.py"
   install -m 0644 "${REPO_ROOT}/core/logger.py" "${APP_ROOT}/core/logger.py"
   install -m 0644 "${REPO_ROOT}/core/sniffer.py" "${APP_ROOT}/core/sniffer.py"
+  install -m 0644 "${REPO_ROOT}/core/detectors.py" "${APP_ROOT}/core/detectors.py"
   install -m 0644 "${REPO_ROOT}/core/dashboard.py" "${APP_ROOT}/core/dashboard.py"
   install -m 0644 "${REPO_ROOT}/core/health.py" "${APP_ROOT}/core/health.py"
+  install -m 0644 "${REPO_ROOT}/core/system_monitor.py" "${APP_ROOT}/core/system_monitor.py"
+  install -d -m 0755 "${APP_ROOT}/storage" "${APP_ROOT}/web"
+  install -m 0644 "${REPO_ROOT}/storage/__init__.py" "${APP_ROOT}/storage/__init__.py"
+  install -m 0644 "${REPO_ROOT}/storage/repository.py" "${APP_ROOT}/storage/repository.py"
+  install -m 0644 "${REPO_ROOT}/web/__init__.py" "${APP_ROOT}/web/__init__.py"
+  install -m 0644 "${REPO_ROOT}/web/api.py" "${APP_ROOT}/web/api.py"
   install -m 0644 "${REPO_ROOT}/requirements.txt" "${APP_ROOT}/requirements.txt"
 
   python3 -m venv "${APP_ROOT}/venv"
   "${APP_ROOT}/venv/bin/pip" install --require-hashes --no-cache-dir \
     -r "${APP_ROOT}/requirements.txt"
   chown -R root:root "${APP_ROOT}/venv" "${APP_ROOT}/core"
+  chown -R root:root "${APP_ROOT}/storage" "${APP_ROOT}/web"
 }
 
 configure_ssh() {
@@ -222,6 +231,23 @@ INTERFACE=auto
 PRIMARY_INTERFACE=auto
 EVENT_LOG=${ACTIVE_LOG_DIR}/events.jsonl
 EVENT_DB=${APP_ROOT}/data/events.db
+HONEYPOT_ENABLED=0
+TRUSTED_DHCP_SERVERS=
+DNS_MAX_NAME_LENGTH=80
+ICMP_PAYLOAD_LIMIT=256
+ICMP_RATE_LIMIT=10
+SLOW_SCAN_WINDOW_SECONDS=900
+SLOW_SCAN_THRESHOLD=20
+MAC_FLOOD_THRESHOLD=200
+THREAT_INTEL_BLOCKLIST=${CONFIG_DIR}/blocklist.txt
+DETECTOR_ARP_SPOOF=1
+DETECTOR_ROGUE_DHCP=1
+DETECTOR_DNS=1
+DETECTOR_ICMP=1
+DETECTOR_SLOW_PORT_SCAN=1
+DETECTOR_NEW_DEVICE=1
+DETECTOR_MAC_FLOODING=1
+DETECTOR_THREAT_INTEL=1
 PORT_SCAN_THRESHOLD=20
 CONNECTION_RATE_THRESHOLD=60
 WINDOW_SECONDS=60
@@ -229,6 +255,7 @@ EGRESS_QUARANTINE=1
 EOF
   chmod 0640 "${CONFIG_DIR}/guardian.conf"
   chown root:"${SERVICE_USER}" "${CONFIG_DIR}/guardian.conf"
+  install -m 0640 -o root -g "${SERVICE_USER}" /dev/null "${CONFIG_DIR}/blocklist.txt"
 
   cat > "${APP_ROOT}/network/iptables_rules.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -257,9 +284,8 @@ EOF
   chmod 755 "${APP_ROOT}/network/iptables_rules.sh"
   docker compose -f "${APP_ROOT}/docker/docker-compose.yml" config >/dev/null ||
     die "Dionaea Docker Compose yapılandırması geçersiz."
-  docker pull --platform linux/amd64 \
-    "dinotools/dionaea@sha256:6f06d0a6035c865cb60ef51bd96ff3b1f25ee4bfcd852dad3f551bc2d93464ca" ||
-    die "Dionaea amd64 imajı indirilemedi; qemu/binfmt veya ağ bağlantısını doğrulayın."
+  install -m 0755 "${REPO_ROOT}/scripts/guardian-honeypot.sh" \
+    /usr/local/sbin/guardian-honeypot.sh
 
   cat > /etc/NetworkManager/dispatcher.d/99-honeypot-adapt.sh <<'EOF'
 #!/usr/bin/env bash
@@ -307,7 +333,7 @@ Wants=network-online.target
 [Service]
 Type=notify
 WorkingDirectory=/opt/guardian/core
-ExecStartPre=/usr/bin/docker compose -f /opt/guardian/docker/docker-compose.yml up -d
+ExecStartPre=/usr/local/sbin/guardian-honeypot.sh
 ExecStartPre=/opt/guardian/network/iptables_rules.sh apply
 ExecStart=/opt/guardian/venv/bin/python3 /opt/guardian/core/sniffer.py --config /opt/guardian/config/guardian.conf
 CPUAffinity=1 2
@@ -333,8 +359,18 @@ EOF
   systemctl enable --now guardian-healthcheck.timer
   install -m 0644 "${REPO_ROOT}/service/guardian-health.service" \
     /etc/systemd/system/guardian-health.service
+  install -m 0644 "${REPO_ROOT}/service/guardian-web.service" \
+    /etc/systemd/system/guardian-web.service
+  install -d -m 0750 -o root -g "${SERVICE_USER}" /etc/guardian
+  printf 'GUARDIAN_API_TOKEN=%s\n' "$(openssl rand -hex 32)" > /etc/guardian/web.env
+  chown root:"${SERVICE_USER}" /etc/guardian/web.env
+  chmod 0640 /etc/guardian/web.env
+  install -m 0644 "${REPO_ROOT}/service/guardian-system-monitor.service" \
+    /etc/systemd/system/guardian-system-monitor.service
   systemctl daemon-reload
   systemctl enable --now guardian-health.service
+  systemctl enable --now guardian-web.service
+  systemctl enable --now guardian-system-monitor.service
 }
 
 configure_auxiliary_services() {

@@ -10,8 +10,8 @@ Environment=GUARDIAN_EVENT_LOG=/opt/guardian/logs/active/events.jsonl
 ExecStart=/opt/guardian/venv/bin/python3 /opt/guardian/core/health.py
 Restart=always
 RestartSec=10
-MemoryMax=64M
-MemorySwapMax=32M
+MemoryMax=48M
+MemorySwapMax=24M
 NoNewPrivileges=true
 PrivateTmp=true
 

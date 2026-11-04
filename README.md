@@ -61,7 +61,7 @@ Kurulum scripti:
 4. `/etc/sysctl.d/99-guardian.conf` ile çekirdek ağ ve bellek korumalarını uygular.
 5. Sistem Python paketlerini kullanan `guardian` Python sanal ortamını oluşturur.
 6. Ağ arayüzü, honeypot portları ve log dizinini yapılandırır.
-7. Docker Compose ile Dionaea'yı başlatır; CPU ve 256 MB RAM limiti uygular. Mevcut sabit Dionaea imajı amd64 olduğundan Pi 5 üzerinde qemu/binfmt ile çalıştırılır.
+7. Dionaea honeypot varsayılan olarak kapalıdır; `HONEYPOT_ENABLED=1` verilirse Compose ile CPU ve 256 MB RAM limiti altında başlatılır.
 8. NetworkManager dispatcher, guardian servisi ve log arşiv timer'ını etkinleştirir.
 9. fail2ban ve zorunlu SSH MFA yapılandırmasını kurar. Kurulumdan önce kurulum kullanıcısı için `google-authenticator` çalıştırılmalıdır.
 10. OpenSSH yoksa kurar; mevcut kullanıcı adı korunur, SSH parola doğrulaması kapatılır ve PAM üzerinden MFA zorunlu kılınır.
@@ -106,6 +106,8 @@ Olay logları `/opt/guardian/logs/active/events.jsonl` altında tutulur.
 - SSH parola doğrulaması kapalıdır; `keyboard-interactive:pam` üzerinden sistem parolası ve Google Authenticator kodu birlikte istenir. Kurulum kullanıcı adı veya parolası değiştirilmez.
 - `config/guardian.conf` içindeki `EGRESS_QUARANTINE` ve `AVAHI_ENABLED` ayarlarını bilinçli değiştirin.
 - Mevcut sabit Dionaea imajı amd64'tür ve Pi 5'te qemu/binfmt emülasyonu ile çalışır. Bu yerel imajdan daha yavaş olabilir; üretimde arm64 uyumlu, doğrulanmış bir imaj bulunduğunda `platform` ve digest birlikte güncellenmelidir.
+- Dionaea varsayılan olarak çalışmaz. Etkinleştirmek için `/opt/guardian/config/guardian.conf` içinde `HONEYPOT_ENABLED=1` yapıp `systemctl restart guardian-core.service` çalıştırın.
+- `guardian-system-monitor.service` NTP senkronizasyonunu, disk kullanımını ve journal kernel uyarılarını JSONL olaylarına yazar.
 - Olay logu 100 MB'a ulaştığında `.1` dosyasına döndürülür; ayrıca filesystem kullanımı %90'a ulaşırsa health check başarısız olur.
 - Egress karantinasını geri almak için `/opt/guardian/network/iptables_rules.sh remove` kullanılabilir.
 
@@ -132,7 +134,9 @@ systemctl start guardian-temperature.service
 `guardian-core` için `MemoryMax=300M`, `MemorySwapMax=100M`, `WatchdogSec=60`,
 `RuntimeMaxSec=86400` ve otomatik yeniden başlatma aktiftir. Python, her 30 saniyede
 watchdog bildirimi gönderir; her beş dakikada `gc.collect()` ve nesne sayısını olay
-loguna yazar.
+loguna yazar. Honeypot varsayılan kapalı olduğunda yardımcı servis limitleriyle
+Guardian süreçlerinin toplam cgroup bütçesi 400 MB altında tutulur; honeypot
+etkinleştirilirse ayrıca 256 MB Docker bütçesi gerekir.
 
 ### Ağ arayüzü geçişi
 
@@ -167,6 +171,75 @@ Flask servisi yalnızca `127.0.0.1:8765` üzerinde `/health` endpoint'i sunar:
 systemctl status guardian-health.service
 curl http://127.0.0.1:8765/health
 ```
+
+## Modül 2: Tespit motoru
+
+Tespitler `DETECTOR_*` ayarlarıyla bağımsız açılıp kapatılır:
+
+- `DETECTOR_ARP_SPOOF`: ARP IP/MAC değişimleri
+- `DETECTOR_ROGUE_DHCP`: `TRUSTED_DHCP_SERVERS` dışındaki DHCP sunucuları
+- `DETECTOR_DNS`: uzun DNS etiketleri ve çelişkili DNS cevapları
+- `DETECTOR_ICMP`: yüksek hacimli ICMP payload göstergeleri
+- `DETECTOR_SLOW_PORT_SCAN`: 15 dakikaya yayılan port taramaları
+- `DETECTOR_NEW_DEVICE`: yeni kaynak MAC adresleri
+- `DETECTOR_MAC_FLOODING`: kısa sürede yüksek sayıda MAC adresi
+- `DETECTOR_THREAT_INTEL`: yerel IP blocklist eşleşmeleri
+
+Örnek:
+
+```ini
+DETECTOR_ARP_SPOOF=1
+DETECTOR_DNS=1
+TRUSTED_DHCP_SERVERS=192.168.1.1
+THREAT_INTEL_BLOCKLIST=/opt/guardian/config/blocklist.txt
+```
+
+Blocklist dosyası satır başına bir IP alır; internetten otomatik çekilmez ve
+operatör tarafından doğrulanmış kaynaklarla güncellenmelidir. Detector hatası
+çekirdek sniff döngüsünü durdurmaz; `detector_error` olayı yazılır.
+
+Test:
+
+```bash
+python -m unittest discover -s tests
+```
+
+## Modül 3: Veri katmanı
+
+SQLite WAL veritabanı `/opt/guardian/data/events.db` altında tutulur.
+Olaylar JSONL ile birlikte `severity` ve `group_key` alanlarıyla saklanır.
+Veri katmanı şu işlemleri sağlar:
+
+- Sayfalı olay sorgulama
+- Öncelik ve olay türü istatistikleri
+- CSV dışa aktarma
+- SQLite WAL ve busy timeout
+- Aylık eski kayıt arşivi ve `VACUUM`
+
+## Modül 5: Web API
+
+Web servisi ayrı çalışır ve yalnızca `127.0.0.1:8766` adresine bağlanır:
+
+```bash
+systemctl status guardian-web.service
+curl http://127.0.0.1:8766/health
+```
+
+Korunan endpoint'ler için kurulum sırasında `/etc/guardian/web.env` içinde
+rastgele bir bearer token oluşturulur:
+
+```bash
+TOKEN="$(sudo awk -F= '{print $2}' /etc/guardian/web.env)"
+curl -H "Authorization: Bearer ${TOKEN}" \
+  "http://127.0.0.1:8766/api/events?limit=50"
+curl -H "Authorization: Bearer ${TOKEN}" \
+  http://127.0.0.1:8766/api/stats
+curl -H "Authorization: Bearer ${TOKEN}" \
+  http://127.0.0.1:8766/api/events.csv
+```
+
+`/health` kimlik doğrulaması istemez, olay ve istatistik endpoint'leri ister.
+Token dosyası root sahibi ve `guardian` grubuna okunabilir olarak oluşturulur.
 
 Egress kuralları Docker'ın `DOCKER-USER` zincirinde uygulanır. Mevcut host firewall kuralları silinmez. İkincil arayüz bağlandığında, `PRIMARY_INTERFACE` seçilmişse o arayüzdeki default route kaldırılır; bu nedenle kurulum sırasında yönetim bağlantısının birincil arayüzünü doğru seçin.
 

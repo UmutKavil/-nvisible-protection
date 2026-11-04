@@ -1,0 +1,18 @@
+[Unit]
+Description=Guardian NTP, disk and kernel log monitor
+After=guardian-core.service
+
+[Service]
+Type=simple
+User=guardian
+SupplementaryGroups=systemd-journal
+ExecStart=/opt/guardian/venv/bin/python3 /opt/guardian/core/system_monitor.py
+Restart=always
+RestartSec=10
+MemoryMax=32M
+MemorySwapMax=16M
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -4,6 +4,7 @@ import argparse
 import gc
 import logging
 import os
+import signal
 import socket
 import threading
 import time
@@ -13,6 +14,7 @@ from typing import Any
 from scapy.all import IP, TCP, sniff
 
 from config import load_config
+from detectors import DetectorEngine
 from logger import JsonEventLogger
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -99,6 +101,15 @@ def main() -> None:
     args = parser.parse_args()
     config = load_config(args.config)
     event_logger = JsonEventLogger(config["EVENT_LOG"], config.get("EVENT_DB"))
+    stop_event = threading.Event()
+
+    def request_shutdown(signum: int, _frame: Any) -> None:
+        LOGGER.info("Kapatma sinyali alındı: %s", signum)
+        event_logger.event("guardian_shutdown", signal=signum)
+        stop_event.set()
+
+    signal.signal(signal.SIGTERM, request_shutdown)
+    signal.signal(signal.SIGINT, request_shutdown)
     threading.Thread(target=maintenance_loop, args=(event_logger,), daemon=True).start()
     detector = AnomalyDetector(
         event_logger,
@@ -106,9 +117,17 @@ def main() -> None:
         int(config.get("CONNECTION_RATE_THRESHOLD", "60")),
         int(config.get("WINDOW_SECONDS", "60")),
     )
+    detector_engine = DetectorEngine(event_logger, config)
     interface = config.get("INTERFACE", "auto")
     notify_systemd("READY=1")
-    sniff(iface=None if interface == "auto" else interface, prn=detector.observe, store=False)
+    while not stop_event.is_set():
+        sniff(
+            iface=None if interface == "auto" else interface,
+            prn=lambda packet: (detector.observe(packet), detector_engine.observe(packet)),
+            store=False,
+            timeout=5,
+        )
+    notify_systemd("STOPPING=1")
 
 
 if __name__ == "__main__":
