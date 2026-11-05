@@ -172,12 +172,31 @@ başlatmayı kapalı tutar ve güncelleme olaylarını syslog/journald'a yazar.
 
 ### Yerel health API
 
-Flask servisi yalnızca `127.0.0.1:8765` üzerinde `/health` endpoint'i sunar:
+Flask servisi yalnızca `127.0.0.1:8766` üzerinde `/health` endpoint'i sunar:
 
 ```bash
-systemctl status guardian-health.service
-curl http://127.0.0.1:8765/health
+systemctl status guardian-web.service
+curl http://127.0.0.1:8766/health
 ```
+
+Korunan API uçları için `/etc/guardian/web.env` içindeki token `Bearer` şemasıyla
+gönderilmelidir:
+
+```bash
+curl -H "Authorization: Bearer ${GUARDIAN_API_TOKEN}" \
+  http://127.0.0.1:8766/api/stats
+```
+
+API çağrılarında `/etc/guardian/web.env` içindeki gerçek değer kullanılmalıdır:
+
+```bash
+TOKEN="$(sudo awk -F= '$1 == "GUARDIAN_API_TOKEN" {print $2}' /etc/guardian/web.env)"
+curl -H "Authorization: Bearer ${TOKEN}" \
+  http://127.0.0.1:8766/api/stats
+```
+
+Not: Belgede kalan eski token gösterimleri kullanılmamalıdır; API yalnızca
+`Bearer` şemasındaki gerçek `GUARDIAN_API_TOKEN` değerini kabul eder.
 
 ## Modül 2: Tespit motoru
 

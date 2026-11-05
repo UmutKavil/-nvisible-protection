@@ -1,0 +1,6 @@
+Flask
+Flask-Limiter
+Flask-WTF
+PyJWT
+bcrypt
+pyotp
