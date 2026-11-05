@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -14,6 +15,11 @@ EVENT_LOG = Path("/opt/guardian/logs/active/events.jsonl")
 FAN_STATE = Path("/sys/class/thermal/cooling_device0/cur_state")
 TEMP_COMMAND = ("vcgencmd", "measure_temp")
 TEMP_PATTERN = re.compile(r"temp=([0-9]+(?:\.[0-9]+)?)")
+
+
+def find_vcgencmd() -> str | None:
+    """vcgencmd yolunu dağıtımın PATH'inden bulur."""
+    return shutil.which("vcgencmd")
 
 
 def read_temperature() -> float:
@@ -55,11 +61,24 @@ def set_fan(level: int) -> None:
 
 
 def main() -> int:
+    vcgencmd = find_vcgencmd()
+    if vcgencmd is None:
+        subprocess.run(
+            ("logger", "-t", "guardian-fan", "vcgencmd bulunamadı, fan kontrolü devre dışı"),
+            check=False,
+        )
+        return 0
     previous_level: int | None = None
     was_overheat = False
     while True:
         try:
-            temperature = read_temperature()
+            result = subprocess.run(
+                (vcgencmd, "measure_temp"), check=True, capture_output=True, text=True
+            )
+            match = TEMP_PATTERN.search(result.stdout)
+            if not match:
+                raise ValueError(f"Geçersiz sıcaklık çıktısı: {result.stdout!r}")
+            temperature = float(match.group(1))
             level = fan_level(temperature)
             if level != previous_level:
                 set_fan(level)

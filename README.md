@@ -233,7 +233,7 @@ Korunan API uçları için `/etc/guardian/web.env` içindeki token `Bearer` şem
 gönderilmelidir:
 
 ```bash
-curl -H "Authorization: Bearer ${GUARDIAN_API_TOKEN}" \
+curl -H "Authorization: Bearer ${TOKEN}" \
   http://127.0.0.1:8766/api/stats
 ```
 
@@ -245,8 +245,7 @@ curl -H "Authorization: Bearer ${TOKEN}" \
   http://127.0.0.1:8766/api/stats
 ```
 
-Not: Belgede kalan eski token gösterimleri kullanılmamalıdır; API yalnızca
-`Bearer` şemasındaki gerçek `GUARDIAN_API_TOKEN` değerini kabul eder.
+API yalnızca `Bearer` şemasındaki gerçek `GUARDIAN_API_TOKEN` değerini kabul eder.
 
 ## Modül 2: Tespit motoru
 
@@ -305,7 +304,7 @@ Korunan endpoint'ler için kurulum sırasında `/etc/guardian/web.env` içinde
 rastgele bir bearer token oluşturulur:
 
 ```bash
-TOKEN="$(sudo awk -F= '{print $2}' /etc/guardian/web.env)"
+TOKEN="$(sudo awk -F= '$1 == "GUARDIAN_API_TOKEN" {print $2}' /etc/guardian/web.env)"
 curl -H "Authorization: Bearer ${TOKEN}" \
   "http://127.0.0.1:8766/api/events?limit=50"
 curl -H "Authorization: Bearer ${TOKEN}" \

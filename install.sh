@@ -121,12 +121,14 @@ install_tailscale() {
   systemctl enable --now tailscaled
   if [[ -n "${TAILSCALE_AUTHKEY:-}" ]]; then
     tailscale up --auth-key="${TAILSCALE_AUTHKEY}" --accept-dns=false
-    tailscale serve --bg http://127.0.0.1:8767
   else
-    warn "Tailscale kuruldu fakat kimlik doğrulanmadı."
-    warn "Paneli Tailscale üzerinden yayınlamak için: sudo tailscale up --accept-dns=false"
-    warn "HTTPS erişimi için: sudo tailscale serve --bg http://127.0.0.1:8767"
+    log "Tailscale kimlik doğrulaması başlatılıyor; gerekirse verilen bağlantıyı açın..."
+    if ! tailscale up --accept-dns=false; then
+      step_error "Tailscale kimlik doğrulaması tamamlanmadı; Serve atlandı."
+      return 1
+    fi
   fi
+  tailscale serve --bg http://127.0.0.1:8767
 }
 
 prepare_layout() {
@@ -492,7 +494,7 @@ EOF
   systemctl daemon-reload
   systemctl enable --now guardian-health.service
   systemctl enable --now guardian-web.service
-  systemctl enable guardian-soc.service
+  systemctl enable --now guardian-soc.service
   systemctl enable --now guardian-package-status.service
   systemctl enable --now guardian-fan.service guardian-throttle.timer
   systemctl enable --now guardian-system-monitor.service
@@ -651,6 +653,27 @@ run_tests() {
   return "${failures}"
 }
 
+print_install_summary() {
+  local tailscale_ip service
+  printf '\n%b========== GUARDIAN KURULUM ÖZETİ ==========%b\n' "${YELLOW}" "${RESET}"
+  for service in guardian-core.service guardian-web.service guardian-soc.service \
+    guardian-fan.service guardian-throttle.timer guardian-package-status.service; do
+    if systemctl is-active --quiet "${service}" || systemctl is-enabled --quiet "${service}"; then
+      ok "${service}"
+    else
+      step_error "${service} başlatılamadı veya etkin değil."
+    fi
+  done
+  tailscale_ip="$(tailscale ip -4 2>/dev/null | head -n 1 || true)"
+  if [[ -n "${tailscale_ip}" ]]; then
+    printf 'SOC Paneline Tailscale üzerinden erişmek için: %s:8767\n' "${tailscale_ip}"
+  else
+    step_error "Tailscale IPv4 adresi bulunamadı."
+    printf 'SOC Paneli: Tailscale bağlantısı tamamlandıktan sonra :8767 portu\n'
+  fi
+  printf '%b============================================%b\n' "${YELLOW}" "${RESET}"
+}
+
 main() {
   run_step "Ön koşul kontrolü" check_prerequisites
   run_step "Paket kurulumu" install_packages
@@ -668,6 +691,7 @@ main() {
   else
     step_error "guardian-core.service başlatılamadı; kurulum devam ediyor."
   fi
+  print_install_summary
   log "Kurulum tamamlandı. Durum: systemctl --no-pager status guardian-core.service"
   printf '\nSSH mevcut kullanıcı ile etkinleştirildi:\n'
   printf '  Kullanıcı: %s\n' "${SSH_LOGIN_USER}"
