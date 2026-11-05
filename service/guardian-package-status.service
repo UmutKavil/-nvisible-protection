@@ -1,0 +1,18 @@
+[Unit]
+Description=Guardian boot package status check
+After=network-online.target apt-daily.service apt-daily-upgrade.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/opt/guardian/scripts/package-status-check.sh
+TimeoutStartSec=180
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/guardian/logs/active /run
+ReadWritePaths=/var/lib/apt/lists /var/cache/apt /var/log/apt
+
+[Install]
+WantedBy=multi-user.target

@@ -81,6 +81,36 @@ systemctl status guardian-healthcheck.timer
 systemctl start guardian-healthcheck.service
 ```
 
+### Tailscale SOC paneli
+
+Kurulum Tailscale daemon'ını kurar ve etkinleştirir. Kimlik doğrulama için
+kurulumdan sonra:
+
+```bash
+sudo tailscale up --accept-dns=false
+sudo tailscale serve --bg http://127.0.0.1:8767
+sudo systemctl start guardian-soc.service
+```
+
+Panel yalnızca localhost ve Tailscale adreslerini kabul eder. `8766` mevcut
+Guardian API'sidir; SOC login uygulaması `8767` üzerinde çalışır. Üretimde
+paneli doğrudan HTTP yerine Tailscale Serve tarafından sağlanan HTTPS URL'siyle
+açın. SOC kimlik bilgileri `/etc/guardian/soc.env` içinde tanımlanmalıdır:
+`GUARDIAN_SOC_PASSWORD_BCRYPT` bcrypt hash, `GUARDIAN_SOC_TOTP_SECRET` ise
+Google Authenticator secret olmalıdır.
+
+### Açılış paket kontrolü
+
+`guardian-package-status.service` her sistem açılışında `apt-get update`
+çalıştırır ve yükseltilebilir paket sayısını `PACKAGE_STATUS` olayı olarak
+`events.jsonl` dosyasına yazar. Paketleri otomatik yükseltmez; mevcut
+`unattended-upgrades` politikası ayrı çalışır. Durumu görmek için:
+
+```bash
+systemctl status guardian-package-status.service
+journalctl -u guardian-package-status.service --no-pager
+```
+
 Kurulum tamamlandığında mevcut SSH kullanıcı adı gösterilir; kullanıcı adı veya parola değiştirilmez:
 
 ```bash

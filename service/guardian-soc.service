@@ -1,0 +1,23 @@
+[Unit]
+Description=Guardian SOC login panel
+After=network-online.target guardian-core.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=guardian
+WorkingDirectory=/opt/guardian/web
+EnvironmentFile=/etc/guardian/soc.env
+ExecStart=/opt/guardian/venv/bin/python3 /opt/guardian/web/app.py
+Restart=always
+RestartSec=10
+MemoryMax=96M
+MemorySwapMax=32M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/guardian/logs/active
+
+[Install]
+WantedBy=multi-user.target

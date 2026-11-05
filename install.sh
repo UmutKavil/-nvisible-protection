@@ -90,6 +90,24 @@ install_packages() {
   systemctl mask earlyoom.service 2>/dev/null || true
 }
 
+install_tailscale() {
+  log "Tailscale kuruluyor..."
+  if ! command -v tailscale >/dev/null 2>&1; then
+    curl -fsSL https://tailscale.com/install.sh | sh
+  fi
+  command -v tailscale >/dev/null ||
+    die "Tailscale kurulumu tamamlanamadı."
+  systemctl enable --now tailscaled
+  if [[ -n "${TAILSCALE_AUTHKEY:-}" ]]; then
+    tailscale up --auth-key="${TAILSCALE_AUTHKEY}" --accept-dns=false
+    tailscale serve --bg http://127.0.0.1:8767
+  else
+    warn "Tailscale kuruldu fakat kimlik doğrulanmadı."
+    warn "Paneli Tailscale üzerinden yayınlamak için: sudo tailscale up --accept-dns=false"
+    warn "HTTPS erişimi için: sudo tailscale serve --bg http://127.0.0.1:8767"
+  fi
+}
+
 prepare_layout() {
   log "Guardian dizinleri hazırlanıyor..."
   install -d -m 0755 "${APP_ROOT}" "${APP_ROOT}/core" "${APP_ROOT}/docker"
@@ -126,16 +144,24 @@ install_application() {
   install -m 0644 "${REPO_ROOT}/storage/repository.py" "${APP_ROOT}/storage/repository.py"
   install -m 0644 "${REPO_ROOT}/web/__init__.py" "${APP_ROOT}/web/__init__.py"
   install -m 0644 "${REPO_ROOT}/web/api.py" "${APP_ROOT}/web/api.py"
+  install -m 0644 "${REPO_ROOT}/web/auth.py" "${APP_ROOT}/web/auth.py"
+  install -m 0644 "${REPO_ROOT}/web/app.py" "${APP_ROOT}/web/app.py"
+  install -d -m 0755 "${APP_ROOT}/templates"
+  install -m 0644 "${REPO_ROOT}/templates/login.html" "${APP_ROOT}/templates/login.html"
   install -m 0644 "${REPO_ROOT}/requirements.txt" "${APP_ROOT}/requirements.txt"
   install -m 0644 "${REPO_ROOT}/requirements-anomaly.txt" "${APP_ROOT}/requirements-anomaly.txt"
+  install -m 0644 "${REPO_ROOT}/requirements-soc.txt" "${APP_ROOT}/requirements-soc.txt"
 
   python3 -m venv "${APP_ROOT}/venv"
   "${APP_ROOT}/venv/bin/pip" install --require-hashes --no-cache-dir \
     -r "${APP_ROOT}/requirements.txt"
   "${APP_ROOT}/venv/bin/pip" install --no-cache-dir \
     -r "${REPO_ROOT}/requirements-anomaly.txt"
+  "${APP_ROOT}/venv/bin/pip" install --no-cache-dir \
+    -r "${APP_ROOT}/requirements-soc.txt"
   chown -R root:root "${APP_ROOT}/venv" "${APP_ROOT}/core"
   chown -R root:root "${APP_ROOT}/storage" "${APP_ROOT}/web"
+  chown -R root:root "${APP_ROOT}/templates"
 }
 
 configure_ssh() {
@@ -235,6 +261,8 @@ configure_network_and_services() {
   install -m 0755 "${REPO_ROOT}/scripts/config_backup.sh" "${APP_ROOT}/scripts/config_backup.sh"
   install -m 0755 "${REPO_ROOT}/scripts/anomaly_daily.py" "${APP_ROOT}/scripts/anomaly_daily.py"
   install -m 0755 "${REPO_ROOT}/scripts/cowrie_log_parser.py" "${APP_ROOT}/scripts/cowrie_log_parser.py"
+  install -m 0755 "${REPO_ROOT}/scripts/package-status-check.sh" \
+    "${APP_ROOT}/scripts/package-status-check.sh"
   install -m 0644 "${REPO_ROOT}/service/guardian-audit-parser.service" \
     /etc/systemd/system/guardian-audit-parser.service
   install -m 0644 "${REPO_ROOT}/service/guardian-config-backup.service" \
@@ -249,6 +277,8 @@ configure_network_and_services() {
     /etc/systemd/system/guardian-cowrie.service
   install -m 0644 "${REPO_ROOT}/service/guardian-cowrie-parser.service" \
     /etc/systemd/system/guardian-cowrie-parser.service
+  install -m 0644 "${REPO_ROOT}/service/guardian-package-status.service" \
+    /etc/systemd/system/guardian-package-status.service
   install -d -m 0755 "${APP_ROOT}/docker/cowrie"
   install -m 0644 "${REPO_ROOT}/docker/cowrie/docker-compose.yml" \
     "${APP_ROOT}/docker/cowrie/docker-compose.yml"
@@ -405,17 +435,32 @@ EOF
   systemctl enable --now guardian-healthcheck.timer
   install -m 0644 "${REPO_ROOT}/service/guardian-health.service" \
     /etc/systemd/system/guardian-health.service
+  install -m 0644 "${REPO_ROOT}/service/guardian-soc.service" \
+    /etc/systemd/system/guardian-soc.service
   install -m 0644 "${REPO_ROOT}/service/guardian-web.service" \
     /etc/systemd/system/guardian-web.service
   install -d -m 0750 -o root -g "${SERVICE_USER}" /etc/guardian
   printf 'GUARDIAN_API_TOKEN=%s\n' "$(openssl rand -hex 32)" > /etc/guardian/web.env
   chown root:"${SERVICE_USER}" /etc/guardian/web.env
   chmod 0640 /etc/guardian/web.env
+  install -d -m 0750 /etc/guardian
+  cat > /etc/guardian/soc.env <<EOF
+SECRET_KEY=${GUARDIAN_SOC_SECRET_KEY:-$(openssl rand -hex 32)}
+JWT_SECRET_KEY=${JWT_SECRET_KEY:-$(openssl rand -hex 32)}
+GUARDIAN_SOC_USERNAME=${GUARDIAN_SOC_USERNAME:-guardian}
+GUARDIAN_SOC_PASSWORD_BCRYPT=${GUARDIAN_SOC_PASSWORD_BCRYPT:-}
+GUARDIAN_SOC_TOTP_SECRET=${GUARDIAN_SOC_TOTP_SECRET:-}
+GUARDIAN_LIMITER_STORAGE=memory://
+EOF
+  chown root:"${SERVICE_USER}" /etc/guardian/soc.env
+  chmod 0640 /etc/guardian/soc.env
   install -m 0644 "${REPO_ROOT}/service/guardian-system-monitor.service" \
     /etc/systemd/system/guardian-system-monitor.service
   systemctl daemon-reload
   systemctl enable --now guardian-health.service
   systemctl enable --now guardian-web.service
+  systemctl enable guardian-soc.service
+  systemctl enable --now guardian-package-status.service
   systemctl enable --now guardian-system-monitor.service
 }
 
@@ -492,6 +537,7 @@ EOF
 main() {
   preflight_checks
   install_packages
+  install_tailscale
   prepare_layout
   install_application
   configure_memory
