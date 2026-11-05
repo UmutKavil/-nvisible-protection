@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Guardian daily anomaly analysis at 03:00
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+Unit=guardian-anomaly.service
+
+[Install]
+WantedBy=timers.target

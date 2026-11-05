@@ -1,0 +1,2 @@
+# Pandas ayrı tutulur; ana requirements.txt --require-hashes ile kurulmaktadır.
+pandas==2.3.3

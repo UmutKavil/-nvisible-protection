@@ -1,0 +1,19 @@
+[Unit]
+Description=Guardian auditd log parser
+After=auditd.service
+Requires=auditd.service
+
+[Service]
+Type=simple
+ExecStart=/opt/guardian/venv/bin/python3 /opt/guardian/scripts/audit_parser.py
+Restart=always
+RestartSec=5
+MemoryMax=32M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/var/log/audit
+ReadWritePaths=/opt/guardian/logs/active
+
+[Install]
+WantedBy=multi-user.target

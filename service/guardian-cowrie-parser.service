@@ -1,0 +1,21 @@
+[Unit]
+Description=Guardian Cowrie log parser
+After=guardian-cowrie.service
+Requires=guardian-cowrie.service
+
+[Service]
+Type=simple
+ExecStart=/opt/guardian/venv/bin/python3 /opt/guardian/scripts/cowrie_log_parser.py
+ExecCondition=/bin/sh -c 'test "$(awk -F= "$1 == \"HONEYPOT_ENABLED\" {print $2}" /opt/guardian/config/guardian.conf)" = 1'
+ExecCondition=/bin/sh -c 'test "$(awk -F= "$1 == \"HONEYPOT_TYPE\" {print $2}" /opt/guardian/config/guardian.conf)" = cowrie'
+Restart=always
+RestartSec=5
+MemoryMax=32M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/opt/guardian/cowrie/log
+ReadWritePaths=/opt/guardian/logs/active
+
+[Install]
+WantedBy=multi-user.target

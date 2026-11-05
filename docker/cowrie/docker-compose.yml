@@ -1,0 +1,23 @@
+services:
+  cowrie:
+    image: cowrie/cowrie:latest
+    platform: linux/arm64
+    container_name: guardian-cowrie
+    restart: unless-stopped
+    mem_limit: 256m
+    cpus: 1.0
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m
+    ports:
+      - "2222:2222/tcp"
+      - "2223:2223/tcp"
+    volumes:
+      - /opt/guardian/config/cowrie/cowrie.cfg:/cowrie/cowrie-git/etc/cowrie.cfg:ro
+      - /opt/guardian/cowrie/log:/cowrie/cowrie-git/var/log/cowrie:rw
+      - /opt/guardian/cowrie/tty:/cowrie/cowrie-git/var/lib/cowrie/tty:rw
+      - /opt/guardian/cowrie/downloads:/cowrie/cowrie-git/var/lib/cowrie/downloads:rw

@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily Guardian configuration snapshot
+
+[Timer]
+OnCalendar=*-*-* 02:15:00
+Persistent=true
+Unit=guardian-config-backup.service
+
+[Install]
+WantedBy=timers.target

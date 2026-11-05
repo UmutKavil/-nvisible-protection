@@ -7,7 +7,7 @@ Raspberry Pi 5 üzerinde çalışan, Dionaea honeypot ve Scapy tabanlı ağ göz
 - JSON formatında olay kaydı
 - Port taraması ve bağlantı yoğunluğu için temel anomali tespiti
 - Rich tabanlı canlı terminal paneli
-- Dionaea konteyneri
+- Dionaea veya Cowrie konteyneri (seçilebilir)
 - Docker `DOCKER-USER` zinciri üzerinden egress karantinası
 - Ethernet/Wi-Fi arayüz değişikliklerine uyum
 - Günlük logların `pigz` ile arşivlenmesi
@@ -95,6 +95,9 @@ sudo journalctl -u guardian-core.service -f
 
 Olay logları `/opt/guardian/logs/active/events.jsonl` altında tutulur.
 
+Auditd HIDS ve yapılandırma yedekleme kurulumu için [Auditd README](ops/auditd/README.md)
+ve [config yedekleme README](ops/config-backup/README.md) belgelerine bakın.
+
 ## Güvenlik notları
 
 - Dionaea yalnızca yetkili olduğunuz ağlarda çalıştırılmalıdır.
@@ -106,7 +109,7 @@ Olay logları `/opt/guardian/logs/active/events.jsonl` altında tutulur.
 - SSH parola doğrulaması kapalıdır; `keyboard-interactive:pam` üzerinden sistem parolası ve Google Authenticator kodu birlikte istenir. Kurulum kullanıcı adı veya parolası değiştirilmez.
 - `config/guardian.conf` içindeki `EGRESS_QUARANTINE` ve `AVAHI_ENABLED` ayarlarını bilinçli değiştirin.
 - Mevcut sabit Dionaea imajı amd64'tür ve Pi 5'te qemu/binfmt emülasyonu ile çalışır. Bu yerel imajdan daha yavaş olabilir; üretimde arm64 uyumlu, doğrulanmış bir imaj bulunduğunda `platform` ve digest birlikte güncellenmelidir.
-- Dionaea varsayılan olarak çalışmaz. Etkinleştirmek için `/opt/guardian/config/guardian.conf` içinde `HONEYPOT_ENABLED=1` yapıp `systemctl restart guardian-core.service` çalıştırın.
+- Honeypot varsayılan olarak çalışmaz. Dionaea için `HONEYPOT_TYPE=dionaea`, Cowrie için `HONEYPOT_TYPE=cowrie` ile birlikte `/opt/guardian/config/guardian.conf` içinde `HONEYPOT_ENABLED=1` yapıp `systemctl restart guardian-core.service` çalıştırın. İkisini aynı anda çalıştırmayın. Dionaea, host SSH ile çakışmaması için hostta 2224/2323 portlarını kullanır.
 - `guardian-system-monitor.service` NTP senkronizasyonunu, disk kullanımını ve journal kernel uyarılarını JSONL olaylarına yazar.
 - Olay logu 100 MB'a ulaştığında `.1` dosyasına döndürülür; ayrıca filesystem kullanımı %90'a ulaşırsa health check başarısız olur.
 - Egress karantinasını geri almak için `/opt/guardian/network/iptables_rules.sh remove` kullanılabilir.

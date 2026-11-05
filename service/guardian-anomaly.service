@@ -1,0 +1,15 @@
+[Unit]
+Description=Guardian daily anomaly analysis
+After=guardian-core.service
+
+[Service]
+Type=oneshot
+User=guardian
+Group=guardian
+ExecStart=/opt/guardian/venv/bin/python3 /opt/guardian/scripts/anomaly_daily.py
+MemoryMax=100M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/opt/guardian/data
+ReadWritePaths=/opt/guardian/logs/active /opt/guardian/logs/anomaly

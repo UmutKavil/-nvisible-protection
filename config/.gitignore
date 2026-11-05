@@ -1,0 +1,4 @@
+# Geçici editör dosyaları config Git deposuna alınmaz.
+*.swp
+*.tmp
+.DS_Store

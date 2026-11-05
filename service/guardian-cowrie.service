@@ -1,0 +1,13 @@
+[Unit]
+Description=Guardian Cowrie honeypot
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+ExecStart=/usr/bin/docker compose -f /opt/guardian/docker/cowrie/docker-compose.yml up -d
+ExecStop=/usr/bin/docker compose -f /opt/guardian/docker/cowrie/docker-compose.yml down
+ExecStartPre=/usr/bin/test -f /opt/guardian/config/guardian.conf
+ExecCondition=/bin/sh -c 'test "$(awk -F= "$1 == \"HONEYPOT_ENABLED\" {print $2}" /opt/guardian/config/guardian.conf)" = 1'
+ExecCondition=/bin/sh -c 'test "$(awk -F= "$1 == \"HONEYPOT_TYPE\" {print $2}" /opt/guardian/config/guardian.conf)" = cowrie'

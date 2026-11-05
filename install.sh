@@ -44,7 +44,7 @@ readonly PACKAGES=(
   build-essential pigz htop iotop git curl wget jq zram-tools watchdog irqbalance
   network-manager avahi-daemon avahi-utils iproute2 iptables
   iw libpcap-dev tcpdump tshark fail2ban docker.io file openssl
-  libpam-google-authenticator
+  libpam-google-authenticator auditd audispd-plugins
   docker-compose-v2 qemu-user-static binfmt-support python3-pip python3-venv
   python3-full openssh-server unattended-upgrades
 )
@@ -96,6 +96,7 @@ prepare_layout() {
   install -d -m 0755 "${CONFIG_DIR}" "${APP_ROOT}/scripts" "${APP_ROOT}/network"
   install -d -o root -g "${SERVICE_USER}" -m 0750 "${APP_ROOT}/data"
   install -d -m 0750 "${ACTIVE_LOG_DIR}" "${ARCHIVE_LOG_DIR}"
+  install -d -o root -g "${SERVICE_USER}" -m 0750 "${LOG_DIR}/anomaly"
   chown root:"${SERVICE_USER}" "${ACTIVE_LOG_DIR}" "${ARCHIVE_LOG_DIR}"
   chown root:"${SERVICE_USER}" "${ACTIVE_LOG_DIR}"
   install -d -o root -g root -m 0700 "${SAMPLE_DIR}"
@@ -126,10 +127,13 @@ install_application() {
   install -m 0644 "${REPO_ROOT}/web/__init__.py" "${APP_ROOT}/web/__init__.py"
   install -m 0644 "${REPO_ROOT}/web/api.py" "${APP_ROOT}/web/api.py"
   install -m 0644 "${REPO_ROOT}/requirements.txt" "${APP_ROOT}/requirements.txt"
+  install -m 0644 "${REPO_ROOT}/requirements-anomaly.txt" "${APP_ROOT}/requirements-anomaly.txt"
 
   python3 -m venv "${APP_ROOT}/venv"
   "${APP_ROOT}/venv/bin/pip" install --require-hashes --no-cache-dir \
     -r "${APP_ROOT}/requirements.txt"
+  "${APP_ROOT}/venv/bin/pip" install --no-cache-dir \
+    -r "${REPO_ROOT}/requirements-anomaly.txt"
   chown -R root:root "${APP_ROOT}/venv" "${APP_ROOT}/core"
   chown -R root:root "${APP_ROOT}/storage" "${APP_ROOT}/web"
 }
@@ -226,12 +230,44 @@ configure_network_and_services() {
     /etc/systemd/system/guardian-healthcheck.service
   install -m 0644 "${REPO_ROOT}/service/guardian-healthcheck.timer" \
     /etc/systemd/system/guardian-healthcheck.timer
+  install -m 0755 "${REPO_ROOT}/scripts/audit_parser.py" "${APP_ROOT}/scripts/audit_parser.py"
+  install -m 0755 "${REPO_ROOT}/scripts/config_check.py" "${APP_ROOT}/scripts/config_check.py"
+  install -m 0755 "${REPO_ROOT}/scripts/config_backup.sh" "${APP_ROOT}/scripts/config_backup.sh"
+  install -m 0755 "${REPO_ROOT}/scripts/anomaly_daily.py" "${APP_ROOT}/scripts/anomaly_daily.py"
+  install -m 0755 "${REPO_ROOT}/scripts/cowrie_log_parser.py" "${APP_ROOT}/scripts/cowrie_log_parser.py"
+  install -m 0644 "${REPO_ROOT}/service/guardian-audit-parser.service" \
+    /etc/systemd/system/guardian-audit-parser.service
+  install -m 0644 "${REPO_ROOT}/service/guardian-config-backup.service" \
+    /etc/systemd/system/guardian-config-backup.service
+  install -m 0644 "${REPO_ROOT}/service/guardian-config-backup.timer" \
+    /etc/systemd/system/guardian-config-backup.timer
+  install -m 0644 "${REPO_ROOT}/service/guardian-anomaly.service" \
+    /etc/systemd/system/guardian-anomaly.service
+  install -m 0644 "${REPO_ROOT}/service/guardian-anomaly.timer" \
+    /etc/systemd/system/guardian-anomaly.timer
+  install -m 0644 "${REPO_ROOT}/service/guardian-cowrie.service" \
+    /etc/systemd/system/guardian-cowrie.service
+  install -m 0644 "${REPO_ROOT}/service/guardian-cowrie-parser.service" \
+    /etc/systemd/system/guardian-cowrie-parser.service
+  install -d -m 0755 "${APP_ROOT}/docker/cowrie"
+  install -m 0644 "${REPO_ROOT}/docker/cowrie/docker-compose.yml" \
+    "${APP_ROOT}/docker/cowrie/docker-compose.yml"
+  install -d -m 0755 "${CONFIG_DIR}/cowrie"
+  install -m 0640 "${REPO_ROOT}/config/cowrie/cowrie.cfg" "${CONFIG_DIR}/cowrie/cowrie.cfg"
+  install -d -m 0770 "${APP_ROOT}/cowrie/log" "${APP_ROOT}/cowrie/tty" "${APP_ROOT}/cowrie/downloads"
+  install -d -m 0755 /etc/audit/rules.d
+  install -m 0640 "${REPO_ROOT}/etc/audit/rules.d/guardian.rules" /etc/audit/rules.d/guardian.rules
+  install -m 0644 "${REPO_ROOT}/config/.gitignore" "${CONFIG_DIR}/.gitignore"
   cat > "${CONFIG_DIR}/guardian.conf" <<EOF
 INTERFACE=auto
 PRIMARY_INTERFACE=auto
 EVENT_LOG=${ACTIVE_LOG_DIR}/events.jsonl
 EVENT_DB=${APP_ROOT}/data/events.db
 HONEYPOT_ENABLED=0
+HONEYPOT_TYPE=dionaea
+AUDITD_ENABLED=1
+CONFIG_BACKUP_ENABLED=1
+ANOMALY_ENABLED=1
 TRUSTED_DHCP_SERVERS=
 DNS_MAX_NAME_LENGTH=80
 ICMP_PAYLOAD_LIMIT=256
@@ -253,6 +289,9 @@ CONNECTION_RATE_THRESHOLD=60
 WINDOW_SECONDS=60
 EGRESS_QUARANTINE=1
 EOF
+  install -d -m 0755 /etc/systemd/system/guardian-core.service.d
+  install -m 0644 "${REPO_ROOT}/service/guardian-core.service.d/config-check.conf" \
+    /etc/systemd/system/guardian-core.service.d/config-check.conf
   chmod 0640 "${CONFIG_DIR}/guardian.conf"
   chown root:"${SERVICE_USER}" "${CONFIG_DIR}/guardian.conf"
   install -m 0640 -o root -g "${SERVICE_USER}" /dev/null "${CONFIG_DIR}/blocklist.txt"
@@ -284,6 +323,8 @@ EOF
   chmod 755 "${APP_ROOT}/network/iptables_rules.sh"
   docker compose -f "${APP_ROOT}/docker/docker-compose.yml" config >/dev/null ||
     die "Dionaea Docker Compose yapılandırması geçersiz."
+  docker compose -f "${APP_ROOT}/docker/cowrie/docker-compose.yml" config >/dev/null ||
+    die "Cowrie Docker Compose yapılandırması geçersiz."
   install -m 0755 "${REPO_ROOT}/scripts/guardian-honeypot.sh" \
     /usr/local/sbin/guardian-honeypot.sh
 
@@ -355,7 +396,10 @@ ReadWritePaths=/opt/guardian/data
 WantedBy=multi-user.target
 EOF
   systemctl daemon-reload
+  augenrules --load
   systemctl enable guardian-core.service
+  systemctl enable --now guardian-audit-parser.service guardian-config-backup.timer guardian-anomaly.timer
+  systemctl enable --now guardian-cowrie-parser.service
   systemctl enable --now guardian-healthcheck.timer
   install -m 0644 "${REPO_ROOT}/service/guardian-health.service" \
     /etc/systemd/system/guardian-health.service

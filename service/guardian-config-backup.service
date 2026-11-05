@@ -1,0 +1,11 @@
+[Unit]
+Description=Guardian configuration snapshot
+
+[Service]
+Type=oneshot
+ExecStart=/opt/guardian/scripts/config_backup.sh
+User=root
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/guardian/config /opt/guardian/backups
