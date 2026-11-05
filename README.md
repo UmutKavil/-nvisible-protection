@@ -99,6 +99,18 @@ açın. SOC kimlik bilgileri `/etc/guardian/soc.env` içinde tanımlanmalıdır:
 `GUARDIAN_SOC_PASSWORD_BCRYPT` bcrypt hash, `GUARDIAN_SOC_TOTP_SECRET` ise
 Google Authenticator secret olmalıdır.
 
+İlk SOC kurulumu için proje kökünde şu komutu çalıştırın. Script Tailscale'i
+bağlar, güçlü şifre ve 2FA secret üretir, servisi başlatır ve telefon bağlantı
+adresini gösterir:
+
+```bash
+sudo ./setup_soc.sh
+```
+
+Script mevcut `/etc/guardian/soc.env` kimlik bilgilerini ezmez. Yeni bilgiler
+yalnızca eksik değerler için üretilir ve düz metin şifre yalnızca ilk üretimde
+terminalde gösterilir.
+
 ### Açılış paket kontrolü
 
 `guardian-package-status.service` her sistem açılışında `apt-get update`
