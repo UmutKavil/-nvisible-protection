@@ -1,0 +1,12 @@
+[Unit]
+Description=Guardian thermal throttle check
+
+[Service]
+Type=oneshot
+ExecStart=/opt/guardian/scripts/check_throttle.sh
+User=root
+MemoryMax=16M
+NoNewPrivileges=false
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/guardian/logs/active

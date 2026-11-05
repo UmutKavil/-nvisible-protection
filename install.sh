@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -Eeuo pipefail
+set -Euo pipefail
 umask 022
 
 readonly APP_ROOT="/opt/guardian"
@@ -14,28 +14,38 @@ readonly SWAPFILE="/swapfile"
 readonly ORIGINAL_HOSTNAME="$(hostname)"
 SSH_LOGIN_USER=""
 
+readonly GREEN='\033[32m'
+readonly RED='\033[31m'
+readonly YELLOW='\033[33m'
+readonly RESET='\033[0m'
+
 log() { printf '[guardian-install] %s\n' "$*"; }
 warn() { printf '[guardian-install][WARN] %s\n' "$*" >&2; }
-die() { printf '[guardian-install][ERROR] %s\n' "$*" >&2; exit 1; }
+ok() { printf '%b[BAŞARILI]%b %s\n' "${GREEN}" "${RESET}" "$*"; }
+skip() { printf '%b[ATLANDI]%b %s\n' "${YELLOW}" "${RESET}" "$*"; }
+step_error() { printf '%b[HATA]%b %s\n' "${RED}" "${RESET}" "$*" >&2; }
+die() { step_error "$*"; return 1; }
 on_error() {
   local exit_code=$?
-  printf '[guardian-install][ERROR] Kurulum başarısız oldu (satır %s, çıkış kodu %s).\n' \
+  printf '%b[HATA]%b Kurulum adımı başarısız oldu (satır %s, çıkış kodu %s).\n' \
+    "${RED}" "${RESET}" \
     "${BASH_LINENO[0]}" "${exit_code}" >&2
-  printf '[guardian-install][ERROR] Başarısız komut: %s\n' "${BASH_COMMAND}" >&2
-  printf '[guardian-install][ERROR] Sebep genellikle yukarıdaki paket, izin, disk, ağ veya servis hatasıdır.\n' >&2
-  printf '[guardian-install][ERROR] Yeniden denemeden önce: journalctl -xe, systemctl --failed ve df -h çıktısını kontrol edin.\n' >&2
-  exit "${exit_code}"
+  printf '[guardian-install] Başarısız komut: %s\n' "${BASH_COMMAND}" >&2
+  return "${exit_code}"
 }
 trap on_error ERR
 
-[[ "${EUID}" -eq 0 ]] || die "Root yetkisi gerekli: sudo ./install.sh"
-[[ "$(uname -m)" == "aarch64" ]] || die "Raspberry Pi 5 Ubuntu arm64/aarch64 gereklidir."
-[[ -r /etc/os-release ]] || die "/etc/os-release bulunamadı."
+if [[ "${EUID}" -ne 0 ]]; then
+  step_error "Root yetkisi gerekli: sudo ./install.sh"
+  exit 1
+fi
 # shellcheck disable=SC1091
-source /etc/os-release
-[[ "${ID:-}" == "ubuntu" ]] || die "Ubuntu Server gereklidir: ${PRETTY_NAME:-bilinmiyor}"
-[[ "${VERSION_ID:-}" == "24.04" ]] ||
-  die "Ubuntu 24.04 gereklidir; bulunan sürüm: ${PRETTY_NAME:-bilinmiyor}"
+if [[ -r /etc/os-release ]]; then
+  source /etc/os-release
+else
+  ID=""
+  VERSION_ID=""
+fi
 
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
@@ -45,9 +55,20 @@ readonly PACKAGES=(
   network-manager avahi-daemon avahi-utils iproute2 iptables
   iw libpcap-dev tcpdump tshark fail2ban docker.io file openssl
   libpam-google-authenticator auditd audispd-plugins
+  ethtool sysstat cpufrequtils lm-sensors stress-ng nftables log2ram
   docker-compose-v2 qemu-user-static binfmt-support python3-pip python3-venv
   python3-full openssh-server unattended-upgrades
 )
+
+run_step() {
+  local name="$1" function_name="$2"
+  printf '\n%b[ADIM]%b %s\n' "${YELLOW}" "${RESET}" "${name}"
+  if "${function_name}"; then
+    ok "${name}"
+  else
+    step_error "${name} başarısız oldu; sonraki adıma geçiliyor."
+  fi
+}
 
 ensure_line() {
   local line="$1" file="$2"
@@ -263,6 +284,12 @@ configure_network_and_services() {
   install -m 0755 "${REPO_ROOT}/scripts/cowrie_log_parser.py" "${APP_ROOT}/scripts/cowrie_log_parser.py"
   install -m 0755 "${REPO_ROOT}/scripts/package-status-check.sh" \
     "${APP_ROOT}/scripts/package-status-check.sh"
+  install -m 0755 "${REPO_ROOT}/scripts/optimize_system.sh" \
+    "${APP_ROOT}/scripts/optimize_system.sh"
+  install -m 0755 "${REPO_ROOT}/scripts/fan_control.py" \
+    "${APP_ROOT}/scripts/fan_control.py"
+  install -m 0755 "${REPO_ROOT}/scripts/check_throttle.sh" \
+    "${APP_ROOT}/scripts/check_throttle.sh"
   install -m 0644 "${REPO_ROOT}/service/guardian-audit-parser.service" \
     /etc/systemd/system/guardian-audit-parser.service
   install -m 0644 "${REPO_ROOT}/service/guardian-config-backup.service" \
@@ -279,6 +306,12 @@ configure_network_and_services() {
     /etc/systemd/system/guardian-cowrie-parser.service
   install -m 0644 "${REPO_ROOT}/service/guardian-package-status.service" \
     /etc/systemd/system/guardian-package-status.service
+  install -m 0644 "${REPO_ROOT}/service/guardian-fan.service" \
+    /etc/systemd/system/guardian-fan.service
+  install -m 0644 "${REPO_ROOT}/service/guardian-throttle.service" \
+    /etc/systemd/system/guardian-throttle.service
+  install -m 0644 "${REPO_ROOT}/service/guardian-throttle.timer" \
+    /etc/systemd/system/guardian-throttle.timer
   install -d -m 0755 "${APP_ROOT}/docker/cowrie"
   install -m 0644 "${REPO_ROOT}/docker/cowrie/docker-compose.yml" \
     "${APP_ROOT}/docker/cowrie/docker-compose.yml"
@@ -461,6 +494,7 @@ EOF
   systemctl enable --now guardian-web.service
   systemctl enable guardian-soc.service
   systemctl enable --now guardian-package-status.service
+  systemctl enable --now guardian-fan.service guardian-throttle.timer
   systemctl enable --now guardian-system-monitor.service
 }
 
@@ -534,22 +568,106 @@ EOF
   (crontab -l 2>/dev/null | grep -vF "${APP_ROOT}/scripts/archive_daily_logs.sh" || true; printf '%s\n' "${cron_line}") | crontab -
 }
 
-main() {
+check_prerequisites() {
+  local architecture ram_kb disk_kb
+  architecture="$(uname -m)"
+  if [[ "${architecture}" != "aarch64" ]]; then
+    step_error "arm64/aarch64 bekleniyor, bulunan: ${architecture}"
+    return 1
+  fi
+  if [[ "${ID:-}" != "ubuntu" || "${VERSION_ID:-}" != "24.04" ]]; then
+    step_error "Ubuntu 24.04 bekleniyor, bulunan: ${PRETTY_NAME:-bilinmiyor}"
+    return 1
+  fi
+  ram_kb="$(awk '/MemTotal:/ {print $2}' /proc/meminfo)"
+  if [[ ! "${ram_kb}" =~ ^[0-9]+$ || "${ram_kb}" -lt 3145728 ]]; then
+    step_error "En az 3 GB RAM gerekli."
+    return 1
+  fi
+  disk_kb="$(df -Pk / | awk 'NR == 2 {print $4}')"
+  if [[ ! "${disk_kb}" =~ ^[0-9]+$ || "${disk_kb}" -lt 8388608 ]]; then
+    step_error "Kök dosya sisteminde en az 8 GB boş alan gerekli."
+    return 1
+  fi
   preflight_checks
-  install_packages
-  install_tailscale
+}
+
+setup_performance() {
+  configure_kernel_and_watchdog
+  if [[ -x "${APP_ROOT}/scripts/optimize_system.sh" ]]; then
+    "${APP_ROOT}/scripts/optimize_system.sh"
+  else
+    step_error "optimize_system.sh bulunamadı; temel kernel ayarları uygulandı."
+  fi
+}
+
+setup_fan_control() {
+  local config_file="/boot/firmware/config.txt"
+  if [[ ! -f "${config_file}" ]]; then
+    step_error "${config_file} bulunamadı; fan ayarı atlandı."
+    return 1
+  fi
+  ensure_line "dtparam=fan_temp0=28000" "${config_file}"
+  ensure_line "dtparam=fan_temp0_hyst=2000" "${config_file}"
+  ensure_line "dtparam=fan_temp0_speed=75" "${config_file}"
+  ensure_line "dtparam=fan_temp1=38000" "${config_file}"
+  ensure_line "dtparam=fan_temp1_hyst=2000" "${config_file}"
+  ensure_line "dtparam=fan_temp1_speed=150" "${config_file}"
+  ensure_line "dtparam=fan_temp2=48000" "${config_file}"
+  ensure_line "dtparam=fan_temp2_hyst=2000" "${config_file}"
+  ensure_line "dtparam=fan_temp2_speed=255" "${config_file}"
+  grep -q '^dtparam=fan_temp2_speed=255$' "${config_file}"
+}
+
+setup_python_env() {
   prepare_layout
   install_application
-  configure_memory
-  configure_kernel_and_watchdog
+  [[ -x "${APP_ROOT}/venv/bin/python3" ]]
+}
+
+setup_services() {
   configure_network_and_services
   configure_auxiliary_services
   configure_archiving
-  configure_ssh
-  [[ "$(hostname)" == "${ORIGINAL_HOSTNAME}" ]] ||
-    die "Kurulum sırasında cihaz hostname'i değişti; mevcut isim korunamadı."
+  systemctl daemon-reload
+  systemctl enable guardian-core.service guardian-web.service guardian-soc.service \
+    guardian-fan.service guardian-throttle.timer guardian-package-status.service
+}
+
+run_tests() {
+  local failures=0
+  if ! "${APP_ROOT}/venv/bin/python3" -c "import scapy"; then
+    step_error "Scapy import testi başarısız."
+    failures=$((failures + 1))
+  fi
+  if command -v vcgencmd >/dev/null 2>&1; then
+    vcgencmd measure_temp >/dev/null ||
+      { step_error "vcgencmd measure_temp başarısız."; failures=$((failures + 1)); }
+  else
+    skip "vcgencmd bulunamadı; Pi dışı ortam olabilir."
+  fi
+  systemctl is-enabled guardian-fan.service >/dev/null 2>&1 ||
+    { step_error "guardian-fan.service etkin değil."; failures=$((failures + 1)); }
+  return "${failures}"
+}
+
+main() {
+  run_step "Ön koşul kontrolü" check_prerequisites
+  run_step "Paket kurulumu" install_packages
+  run_step "Tailscale kurulumu" install_tailscale
+  run_step "Python ortamı ve Guardian dizinleri" setup_python_env
+  run_step "Performans ayarları" setup_performance
+  run_step "Fan donanım ayarları" setup_fan_control
+  run_step "Bellek ayarları" configure_memory
+  run_step "Servis kurulumu" setup_services
+  run_step "SSH yapılandırması" configure_ssh
+  run_step "Throttle ve sistem testleri" run_tests
   log "Guardian servisi etkinleştiriliyor..."
-  systemctl start guardian-core.service
+  if systemctl start guardian-core.service; then
+    ok "guardian-core.service başlatıldı."
+  else
+    step_error "guardian-core.service başlatılamadı; kurulum devam ediyor."
+  fi
   log "Kurulum tamamlandı. Durum: systemctl --no-pager status guardian-core.service"
   printf '\nSSH mevcut kullanıcı ile etkinleştirildi:\n'
   printf '  Kullanıcı: %s\n' "${SSH_LOGIN_USER}"

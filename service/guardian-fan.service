@@ -1,0 +1,18 @@
+[Unit]
+Description=Guardian Raspberry Pi fan controller
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/opt/guardian/venv/bin/python3 /opt/guardian/scripts/fan_control.py
+Restart=always
+RestartSec=5
+User=root
+MemoryMax=20M
+NoNewPrivileges=false
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/sys/class/thermal/cooling_device0 /opt/guardian/logs/active
+
+[Install]
+WantedBy=multi-user.target

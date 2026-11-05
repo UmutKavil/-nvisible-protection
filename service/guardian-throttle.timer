@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Guardian thermal throttle check every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+Persistent=true
+Unit=guardian-throttle.service
+
+[Install]
+WantedBy=timers.target

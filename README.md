@@ -111,6 +111,26 @@ systemctl status guardian-package-status.service
 journalctl -u guardian-package-status.service --no-pager
 ```
 
+### Pi 5 performans ve termal koruma
+
+Optimizasyonları root olarak uygulamak için:
+
+```bash
+sudo /opt/guardian/scripts/optimize_system.sh
+sudo systemctl enable --now guardian-fan.service guardian-throttle.timer
+```
+
+Tam kurulum sırasında otomatik uygulamak için:
+
+```bash
+sudo RUN_SYSTEM_OPTIMIZATION=1 ./install.sh
+```
+
+Fan kontrolü `vcgencmd` ve kernel cooling device üzerinden 0-3 kademelerini
+kullanır. `vcgencmd` bulunmayan Ubuntu kurulumlarında fan servisi journal'a hata
+yazar; donanım fanı için Raspberry Pi firmware/driver desteği gereklidir.
+Throttle kontrolü her dakika `THERMAL_THROTTLE` olayı üretir.
+
 Kurulum tamamlandığında mevcut SSH kullanıcı adı gösterilir; kullanıcı adı veya parola değiştirilmez:
 
 ```bash
