@@ -1,4 +1,5 @@
 --only-binary=:all:
+# Pandas anomaly modülü için requirements-anomaly.txt üzerinden kurulur.
 scapy==2.6.1 \
     --hash=sha256:88a998572049b511a1f3e44f4aa7c62dd39c6ea2aa1bb58434f503956641789d
 rich==13.9.4 \

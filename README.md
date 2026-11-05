@@ -98,6 +98,10 @@ Olay logları `/opt/guardian/logs/active/events.jsonl` altında tutulur.
 Auditd HIDS ve yapılandırma yedekleme kurulumu için [Auditd README](ops/auditd/README.md)
 ve [config yedekleme README](ops/config-backup/README.md) belgelerine bakın.
 
+Ek modüller: [Cowrie](ops/cowrie/README.md), [günlük anomali](ops/anomaly/README.md),
+[SPAN topolojisi](docs/SPAN_TOPOLOJI.md), [tehdit modeli](docs/TEHDIT_MODELI.md) ve
+[IDS karşılaştırması](docs/KARSILASTIRMA.md).
+
 ## Güvenlik notları
 
 - Dionaea yalnızca yetkili olduğunuz ağlarda çalıştırılmalıdır.

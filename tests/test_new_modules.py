@@ -12,7 +12,7 @@ class NewModuleTests(unittest.TestCase):
             'type=PATH msg=audit(1700000000.1:42) item=0 name="/etc/passwd" '
             'key="guardian_file"'
         )
-        self.assertEqual(record["event_type"], "HIDS_DOSYA_DEGISIKLIGI")
+        self.assertEqual(record["event_type"], "AUDIT_FILE_CHANGE")
 
     def test_config_validation(self):
         with tempfile.TemporaryDirectory() as directory:

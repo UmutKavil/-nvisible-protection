@@ -12,11 +12,11 @@ from typing import Any
 
 
 EVENT_TYPES = {
-    "cowrie.session.connect": "HONEYPOT_BAGLANTI",
-    "cowrie.login.failed": "HONEYPOT_BASARISIZ_GIRIS",
-    "cowrie.login.success": "HONEYPOT_BASARILI_GIRIS",
-    "cowrie.command.input": "HONEYPOT_KOMUT",
-    "cowrie.session.file_download": "HONEYPOT_DOSYA_INDIRME",
+    "cowrie.session.connect": "COWRIE_LOGIN",
+    "cowrie.login.failed": "COWRIE_LOGIN",
+    "cowrie.login.success": "COWRIE_LOGIN",
+    "cowrie.command.input": "COWRIE_COMMAND",
+    "cowrie.session.file_download": "COWRIE_DOWNLOAD",
 }
 
 

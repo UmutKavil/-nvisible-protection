@@ -12,6 +12,7 @@ Kurulum ve test:
 sudo systemctl enable --now guardian-anomaly.timer
 sudo systemctl start guardian-anomaly.service
 cat /opt/guardian/logs/anomaly/$(date +%F).json
+python3 /opt/guardian/scripts/anomaly_daily.py --dry-run
 ```
 
 Pandas sanal ortamda bulunmalıdır. Kurulumda:

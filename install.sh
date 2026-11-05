@@ -256,7 +256,7 @@ configure_network_and_services() {
   install -m 0640 "${REPO_ROOT}/config/cowrie/cowrie.cfg" "${CONFIG_DIR}/cowrie/cowrie.cfg"
   install -d -m 0770 "${APP_ROOT}/cowrie/log" "${APP_ROOT}/cowrie/tty" "${APP_ROOT}/cowrie/downloads"
   install -d -m 0755 /etc/audit/rules.d
-  install -m 0640 "${REPO_ROOT}/etc/audit/rules.d/guardian.rules" /etc/audit/rules.d/guardian.rules
+  install -m 0640 "${REPO_ROOT}/ops/auditd/guardian.rules" /etc/audit/rules.d/guardian.rules
   install -m 0644 "${REPO_ROOT}/config/.gitignore" "${CONFIG_DIR}/.gitignore"
   cat > "${CONFIG_DIR}/guardian.conf" <<EOF
 INTERFACE=auto
@@ -268,6 +268,8 @@ HONEYPOT_TYPE=dionaea
 AUDITD_ENABLED=1
 CONFIG_BACKUP_ENABLED=1
 ANOMALY_ENABLED=1
+ANOMALY_THRESHOLD=3
+COWRIE_PORT=2222
 TRUSTED_DHCP_SERVERS=
 DNS_MAX_NAME_LENGTH=80
 ICMP_PAYLOAD_LIMIT=256

@@ -1,0 +1,10 @@
+# Guardian audit kuralları mevcut kurallara eklenir; mevcut dosyalar silinmez.
+-w /etc/passwd -p wa -k guardian_file
+-w /etc/shadow -p wa -k guardian_file
+-w /etc/sudoers -p wa -k guardian_file
+-w /etc/ssh/sshd_config -p wa -k guardian_file
+-w /opt/guardian/config -p wa -k guardian_file
+-a always,exit -F arch=b64 -S execve -F auid>=1000 -F euid=0 -k guardian_root_exec
+-w /usr/bin/sudo -p x -k guardian_priv_esc
+-w /usr/bin/su -p x -k guardian_priv_esc
+-w /usr/bin/pkexec -p x -k guardian_priv_esc

@@ -10,5 +10,6 @@ Ubuntu 24.04'te kurulum için root olarak `sudo apt install auditd audispd-plugi
 `sudo augenrules --load` ve `sudo systemctl enable --now guardian-audit-parser.service`
 çalıştırın. Paket kurulu değilse parser servisi başlatılmamalıdır.
 
-Manuel test: `sudo python3 /opt/guardian/scripts/audit_parser.py --once`.
+Olay tipleri `AUDIT_FILE_CHANGE`, `AUDIT_ROOT_EXEC` ve `AUDIT_PRIV_ESC` olarak
+yazılır. Manuel test: `sudo python3 /opt/guardian/scripts/audit_parser.py --once`.
 Kuralların yüklendiğini `sudo auditctl -l | grep guardian_` ile doğrulayın.

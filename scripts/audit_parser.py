@@ -23,22 +23,18 @@ def parse_line(line: str) -> dict[str, object] | None:
     fields = {match.group("key"): match.group("value").strip('"') for match in FIELD.finditer(line)}
     key = fields.get("key", "")
     record_type = fields.get("type", "")
-    interesting = (
-        "guardian_" in key
-        or record_type in {"SYSCALL", "PATH"}
-        or fields.get("comm") in {"sudo", "su", "pkexec"}
-    )
+    interesting = "guardian_" in key or fields.get("comm") in {"sudo", "su", "pkexec"}
     if not interesting:
         return None
     timestamp = datetime.fromtimestamp(float(header.group("epoch")), tz=timezone.utc).isoformat()
     event_type = {
-        "guardian_file": "HIDS_DOSYA_DEGISIKLIGI",
-        "guardian-root-exec": "HIDS_ROOT_EXEC",
-        "guardian_privilege": "HIDS_YETKI_YUKSELTME",
+        "guardian_file": "AUDIT_FILE_CHANGE",
+        "guardian_root_exec": "AUDIT_ROOT_EXEC",
+        "guardian_priv_esc": "AUDIT_PRIV_ESC",
     }
     selected_key = next((name for name in event_type if name in key), "")
     if fields.get("comm") in {"sudo", "su", "pkexec"}:
-        selected_key = "guardian_privilege"
+        selected_key = "guardian_priv_esc"
     return {
         "timestamp": timestamp,
         "event_type": event_type.get(selected_key, "HIDS_AUDIT"),

@@ -14,7 +14,7 @@ class CowrieTests(unittest.TestCase):
             "src_ip": "192.0.2.10",
             "username": "root",
         }))
-        self.assertEqual(record["event_type"], "HONEYPOT_BASARISIZ_GIRIS")
+        self.assertEqual(record["event_type"], "COWRIE_LOGIN")
         self.assertEqual(record["cowrie_event"]["src_ip"], "192.0.2.10")
 
     def test_rejects_invalid_json(self):
